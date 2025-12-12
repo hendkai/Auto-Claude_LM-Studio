@@ -48,7 +48,7 @@ if env_file.exists():
 elif dev_env_file.exists():
     load_dotenv(dev_env_file)
 
-from agent import run_autonomous_agent
+from agent import run_autonomous_agent, run_followup_planner
 from coordinator import SwarmCoordinator
 from progress import count_chunks, print_paused_banner, is_build_complete
 from linear_updater import is_linear_enabled, LinearTaskState
@@ -871,16 +871,57 @@ def main() -> None:
 
         # Successfully collected follow-up task
         # The collect_followup_task() function already saved to FOLLOWUP_REQUEST.md
-        # TODO: Chunk 5-2 will add run_followup_planner() call here
+        # Now run the follow-up planner to add new chunks
         print()
-        content = [
-            bold(f"{icon(Icons.INFO)} NEXT STEPS"),
-            "",
-            "Follow-up task saved. Planner integration will be added in a future update.",
-            "",
-            muted("For now, you can manually re-run the planner to add new chunks."),
-        ]
-        print(box(content, width=70, style="light"))
+
+        if not validate_environment(spec_dir):
+            sys.exit(1)
+
+        try:
+            success = asyncio.run(
+                run_followup_planner(
+                    project_dir=project_dir,
+                    spec_dir=spec_dir,
+                    model=args.model,
+                    verbose=args.verbose,
+                )
+            )
+
+            if success:
+                # Show next steps after successful planning
+                content = [
+                    bold(f"{icon(Icons.SUCCESS)} FOLLOW-UP PLANNING COMPLETE"),
+                    "",
+                    "New chunks have been added to your implementation plan.",
+                    "",
+                    highlight("To continue building:"),
+                    f"  python auto-claude/run.py --spec {spec_dir.name}",
+                ]
+                print(box(content, width=70, style="heavy"))
+            else:
+                # Planning didn't fully succeed
+                content = [
+                    bold(f"{icon(Icons.WARNING)} FOLLOW-UP PLANNING INCOMPLETE"),
+                    "",
+                    "Check the implementation plan manually.",
+                    "",
+                    muted("You may need to run the follow-up again."),
+                ]
+                print(box(content, width=70, style="light"))
+                sys.exit(1)
+
+        except KeyboardInterrupt:
+            print("\n\nFollow-up planning paused.")
+            print(f"To retry: python auto-claude/run.py --spec {spec_dir.name} --followup")
+            sys.exit(0)
+        except Exception as e:
+            print()
+            print(error(f"{icon(Icons.ERROR)} Follow-up planning error: {e}"))
+            if args.verbose:
+                import traceback
+                traceback.print_exc()
+            sys.exit(1)
+
         return
 
     # Normal build flow
