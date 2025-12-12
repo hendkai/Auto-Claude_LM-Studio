@@ -4,6 +4,7 @@ export * from './KanbanBoard';
 export * from './TaskCard';
 export * from './TaskDetailPanel';
 export * from './TaskCreationWizard';
+export * from './TaskEditDialog';
 export * from './ProjectSettings';
 export * from './AppSettings';
 export * from './Context';

@@ -1,3 +1,26 @@
+/**
+ * TaskEditDialog - Dialog for editing task title and description
+ *
+ * Allows users to modify the title and description of an existing task.
+ * Follows the same dialog pattern as TaskCreationWizard for consistency.
+ *
+ * Features:
+ * - Pre-populates form with current task values
+ * - Form validation (title and description required)
+ * - Shows attached images in read-only mode (if task has images)
+ * - Saves changes via persistUpdateTask (updates store + spec files)
+ * - Prevents save when no changes have been made
+ *
+ * @example
+ * ```tsx
+ * <TaskEditDialog
+ *   task={selectedTask}
+ *   open={isEditDialogOpen}
+ *   onOpenChange={setIsEditDialogOpen}
+ *   onSaved={() => console.log('Task updated!')}
+ * />
+ * ```
+ */
 import { useState, useEffect } from 'react';
 import { Loader2, Image as ImageIcon, ChevronDown, ChevronUp } from 'lucide-react';
 import {
@@ -16,10 +39,17 @@ import { persistUpdateTask } from '../stores/task-store';
 import { cn } from '../lib/utils';
 import type { Task, ImageAttachment } from '../../shared/types';
 
+/**
+ * Props for the TaskEditDialog component
+ */
 interface TaskEditDialogProps {
+  /** The task to edit */
   task: Task;
+  /** Whether the dialog is open */
   open: boolean;
+  /** Callback when the dialog open state changes */
   onOpenChange: (open: boolean) => void;
+  /** Optional callback when task is successfully saved */
   onSaved?: () => void;
 }
 
