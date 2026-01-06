@@ -345,7 +345,7 @@ export class AgentProcessManager {
     try {
       // Load settings to check for phase-specific configuration
       const settings = await readSettingsFile();
-      const phaseModelsV2: PhaseModelConfigV2 | undefined = settings?.customPhaseModelsV2;
+      const phaseModelsV2 = settings?.customPhaseModelsV2 as PhaseModelConfigV2 | undefined;
 
       // Determine initial phase (spec-runner starts in spec, others in planning)
       const initialPhase: 'spec' | 'planning' | 'coding' | 'qa' = isSpecRunner ? 'spec' : 'planning';
