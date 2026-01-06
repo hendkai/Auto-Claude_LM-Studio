@@ -357,6 +357,29 @@ app.whenReady().then(() => {
     const usageMonitor = getUsageMonitor();
     usageMonitor.start();
     console.warn('[main] Usage monitor initialized and started');
+    
+    // Auto-start LiteLLM if active profile uses localhost:4000
+    (async () => {
+      try {
+        const { loadProfilesFile } = await import('./services/profile');
+        const profiles = await loadProfilesFile();
+        const activeProfile = profiles.profiles.find(p => p.isActive);
+        if (activeProfile) {
+          const baseUrl = activeProfile.baseUrl?.toLowerCase() || '';
+          if (baseUrl.includes('localhost:4000') || baseUrl.includes('127.0.0.1:4000')) {
+            console.log('[main] Active profile uses LiteLLM proxy, starting automatically...');
+            const { getLiteLLMService } = await import('./services/litellm-service');
+            const litellmService = getLiteLLMService();
+            // Start in background, don't wait for it
+            litellmService.start().catch((err) => {
+              console.warn('[main] Failed to auto-start LiteLLM:', err);
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('[main] Failed to check for LiteLLM auto-start:', error);
+      }
+    })();
 
     // Log debug mode status
     const isDebugMode = process.env.DEBUG === 'true';

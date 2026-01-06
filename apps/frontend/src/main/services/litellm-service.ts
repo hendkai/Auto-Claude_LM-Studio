@@ -209,15 +209,37 @@ litellm_settings:
     }
 
     // Start LiteLLM
+    // Use litellm.proxy.proxy_cli.run_server.main() to invoke the Click command
+    // because litellm doesn't have __main__.py
     console.log(`[LiteLLM] Starting with config: ${configPath}`);
+    
+    // Create a small Python script to start LiteLLM
+    // PYTHONPATH is already set in pythonEnv, so we just need to import and run
+    const litellmScript = `
+import sys
+import os
+# PYTHONPATH should already be set by environment, but ensure it's in sys.path
+if 'PYTHONPATH' in os.environ:
+    for p in os.environ['PYTHONPATH'].split(os.pathsep):
+        if p and os.path.exists(p) and p not in sys.path:
+            sys.path.insert(0, p)
+# Import and run litellm proxy server
+# run_server is a Click command, use .main() to invoke it
+from litellm.proxy.proxy_cli import run_server
+# Set sys.argv to simulate command line arguments
+sys.argv = ['litellm', '--config', r"${configPath.replace(/\\/g, '\\\\')}", '--port', '${String(this.DEFAULT_PORT)}']
+# Invoke the Click command with standalone_mode=False to prevent sys.exit()
+run_server.main(standalone_mode=False)
+`.trim();
+    
+    // Write script to temp file
+    const tempScriptPath = path.join(app.getPath('temp'), 'litellm_start.py');
+    fs.writeFileSync(tempScriptPath, litellmScript);
+    console.log(`[LiteLLM] Created startup script: ${tempScriptPath}`);
+    console.log(`[LiteLLM] PYTHONPATH: ${pythonEnv.PYTHONPATH || 'not set'}`);
+    
     this.process = spawn(pythonCommand, [
-      ...pythonBaseArgs,
-      '-m',
-      'litellm',
-      '--config',
-      configPath,
-      '--port',
-      String(this.DEFAULT_PORT),
+      tempScriptPath,
     ], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {

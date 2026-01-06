@@ -20,4 +20,5 @@ pydantic>=2.0.0
 openai>=1.0.0
 
 # LiteLLM Proxy for local LLM providers (LM Studio, Ollama, etc.)
-litellm>=1.0.0
+# Use [proxy] extra to include fastapi, uvicorn, and other proxy dependencies
+litellm[proxy]>=1.0.0

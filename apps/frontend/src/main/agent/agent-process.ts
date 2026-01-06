@@ -629,8 +629,9 @@ export class AgentProcessManager {
           processLog(line);
           
           // Check for rate limit during execution (not just on exit)
+          // Use allOutput (accumulated) instead of just line to detect repeated messages
           if (!rateLimitHandled) {
-            const rateLimitDetection = detectRateLimit(line);
+            const rateLimitDetection = detectRateLimit(allOutput);
             if (rateLimitDetection.isRateLimited) {
               console.log('[AgentProcess] Rate limit detected during execution:', rateLimitDetection);
               console.log('[AgentProcess] Current process state:', {

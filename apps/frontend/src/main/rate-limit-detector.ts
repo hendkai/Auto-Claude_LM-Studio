@@ -8,20 +8,24 @@ import { getClaudeProfileManager } from './claude-profile-manager';
 /**
  * Regex pattern to detect Claude Code rate limit messages
  * Matches: "Limit reached · resets Dec 17 at 6am (Europe/Oslo)"
- * Also matches: "You're out of extra usage · resets 7pm (Europe/Berlin)"
+ * 
+ * NOTE: "You're out of extra usage" is NOT a rate limit - it just means
+ * the extra usage quota is exhausted, but normal quota may still be available.
+ * Only "Limit reached" indicates a true rate limit that requires model switching.
  */
-const RATE_LIMIT_PATTERN = /(?:Limit reached|You're out of extra usage)\s*[·•]\s*resets\s+(.+?)(?:\s*$|\n)/im;
+const RATE_LIMIT_PATTERN = /Limit reached\s*[·•]\s*resets\s+(.+?)(?:\s*$|\n)/im;
 
 /**
  * Additional patterns that might indicate rate limiting
+ * NOTE: "out of extra usage" is excluded - it's not a true rate limit
  */
 const RATE_LIMIT_INDICATORS = [
-  /out\s*of\s*extra\s*usage/i,
-  /rate\s*limit/i,
-  /usage\s*limit/i,
-  /limit\s*reached/i,
-  /exceeded.*limit/i,
-  /too\s*many\s*requests/i
+  /^limit\s*reached/i,  // Only "limit reached" at start of line (not "out of extra usage")
+  /rate\s*limit\s*exceeded/i,
+  /usage\s*limit\s*exceeded/i,
+  /exceeded.*rate\s*limit/i,
+  /too\s*many\s*requests/i,
+  /429\s*too\s*many\s*requests/i
 ];
 
 /**
@@ -100,7 +104,7 @@ export function detectRateLimit(
   output: string,
   profileId?: string
 ): RateLimitDetectionResult {
-  // Check for the primary rate limit pattern
+  // Check for the primary rate limit pattern ("Limit reached")
   const match = output.match(RATE_LIMIT_PATTERN);
 
   if (match) {
@@ -118,6 +122,43 @@ export function detectRateLimit(
     }
 
     // Find best alternative profile
+    const bestProfile = profileManager.getBestAvailableProfile(effectiveProfileId);
+
+    return {
+      isRateLimited: true,
+      resetTime,
+      limitType,
+      profileId: effectiveProfileId,
+      suggestedProfile: bestProfile ? {
+        id: bestProfile.id,
+        name: bestProfile.name
+      } : undefined,
+      originalError: output
+    };
+  }
+
+  // Check for repeated "out of extra usage" messages
+  // If it appears multiple times (3+), it means requests are failing = rate limit
+  const extraUsageMatches = output.match(/You're out of extra usage/gi);
+  if (extraUsageMatches && extraUsageMatches.length >= 3) {
+    console.log(`[RateLimitDetector] Detected ${extraUsageMatches.length} "out of extra usage" messages - treating as rate limit`);
+    
+    // Extract reset time if available
+    const resetTimeMatch = output.match(/You're out of extra usage\s*[·•]\s*resets\s+(.+?)(?:\s*$|\n)/im);
+    const resetTime = resetTimeMatch ? resetTimeMatch[1].trim() : undefined;
+    const limitType = resetTime ? classifyLimitType(resetTime) : 'session';
+
+    const profileManager = getClaudeProfileManager();
+    const effectiveProfileId = profileId || profileManager.getActiveProfile().id;
+
+    try {
+      if (resetTime) {
+        profileManager.recordRateLimitEvent(effectiveProfileId, resetTime);
+      }
+    } catch (err) {
+      console.error('[RateLimitDetector] Failed to record rate limit event:', err);
+    }
+
     const bestProfile = profileManager.getBestAvailableProfile(effectiveProfileId);
 
     return {
