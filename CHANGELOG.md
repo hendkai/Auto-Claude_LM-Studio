@@ -1,3 +1,21 @@
+## 2.7.4 - LiteLLM Proxy Integration
+
+### ✨ New Features
+
+- **LiteLLM Proxy Service**: Integrated LiteLLM proxy server for local LLM providers (LM Studio, Ollama, etc.)
+- **Automatic LiteLLM Startup**: LiteLLM automatically starts when an API profile with `localhost:4000` is activated
+- **LiteLLM Service Management**: IPC handlers for starting, stopping, and checking LiteLLM service status
+- **Default Configuration**: Auto-creates `litellm_config.yaml` in user config directory if not present
+- **Bundled LiteLLM**: LiteLLM is now included in the AppImage with all dependencies
+
+### 🛠️ Improvements
+
+- LiteLLM proxy is automatically bundled with the Electron app (no manual installation required)
+- Config file is bundled in AppImage and automatically found in multiple locations
+- Service automatically detects if LiteLLM is already running on port 4000
+
+---
+
 ## 2.7.3 - Automatic Fallback Model Switching
 
 ### 🛠️ Improvements
