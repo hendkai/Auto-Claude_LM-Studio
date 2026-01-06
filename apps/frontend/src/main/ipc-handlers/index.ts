@@ -33,6 +33,7 @@ import { registerDebugHandlers } from './debug-handlers';
 import { registerClaudeCodeHandlers } from './claude-code-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
 import { registerProfileHandlers } from './profile-handlers';
+import { registerLiteLLMHandlers } from './litellm-handlers';
 import { registerTerminalWorktreeIpcHandlers } from './terminal';
 import { notificationService } from '../notification-service';
 
@@ -121,6 +122,9 @@ export function setupIpcHandlers(
 
   // API Profile handlers (custom Anthropic-compatible endpoints)
   registerProfileHandlers();
+
+  // LiteLLM Proxy service handlers
+  registerLiteLLMHandlers();
 
   console.warn('[IPC] All handler modules registered successfully');
 }

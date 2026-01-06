@@ -26,6 +26,7 @@ import {
   testConnection,
   discoverModels
 } from '../services/profile';
+import { getLiteLLMService } from '../services/litellm-service';
 
 // Track active test connection requests for cancellation
 const activeTestConnections = new Map<number, AbortController>();
@@ -144,6 +145,8 @@ export function registerProfileHandlers(): void {
     IPC_CHANNELS.PROFILES_SET_ACTIVE,
     async (_, profileId: string | null): Promise<IPCResult> => {
       try {
+        let activeProfileBaseUrl: string | null = null;
+
         await atomicModifyProfiles((file) => {
           // If switching to OAuth (null), clear active profile
           if (profileId === null) {
@@ -152,15 +155,33 @@ export function registerProfileHandlers(): void {
           }
 
           // Check if profile exists
-          const profileExists = file.profiles.some((p) => p.id === profileId);
-          if (!profileExists) {
+          const profile = file.profiles.find((p) => p.id === profileId);
+          if (!profile) {
             throw new Error('Profile not found');
           }
+
+          // Store baseUrl for LiteLLM check
+          activeProfileBaseUrl = profile.baseUrl;
 
           // Set active profile
           file.activeProfileId = profileId;
           return file;
         });
+
+        // Auto-start LiteLLM if profile uses localhost:4000
+        if (activeProfileBaseUrl && activeProfileBaseUrl.includes('localhost:4000')) {
+          try {
+            const litellmService = getLiteLLMService();
+            const status = await litellmService.getStatus();
+            if (!status.isRunning) {
+              console.log('[Profile] Auto-starting LiteLLM for localhost:4000 profile');
+              await litellmService.start();
+            }
+          } catch (error) {
+            // Don't fail profile activation if LiteLLM start fails
+            console.warn('[Profile] Failed to auto-start LiteLLM:', error);
+          }
+        }
 
         return { success: true };
       } catch (error) {

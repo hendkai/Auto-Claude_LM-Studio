@@ -185,6 +185,10 @@
           "!**/.pytest_cache",
           "!**/.mypy_cache"
         ]
+      },
+      {
+        "from": "../litellm_config.yaml",
+        "to": "litellm_config.yaml"
       }
     ],
     "mac": {

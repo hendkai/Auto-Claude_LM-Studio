@@ -130,6 +130,12 @@ export const IPC_CHANNELS = {
   PROFILES_DISCOVER_MODELS: 'profiles:discover-models',
   PROFILES_DISCOVER_MODELS_CANCEL: 'profiles:discover-models-cancel',
 
+  // LiteLLM Proxy service
+  LITELLM_GET_STATUS: 'litellm:get-status',
+  LITELLM_START: 'litellm:start',
+  LITELLM_STOP: 'litellm:stop',
+  LITELLM_RESTART: 'litellm:restart',
+
   // Dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:selectDirectory',
   DIALOG_CREATE_PROJECT_FOLDER: 'dialog:createProjectFolder',
