@@ -1,3 +1,20 @@
+## 2.7.3 - Automatic Fallback Model Switching
+
+### 🛠️ Improvements
+
+- Automatic fallback model switching when rate limits are detected
+- Model badge now shows currently active model (reflects fallback switches)
+- Phase-specific fallback chains (uses correct fallback list for planning/coding/qa phases)
+- Rate limit detection during execution (not just on process exit)
+- Added GLM model support to model labels and colors
+
+### 🐛 Bug Fixes
+
+- Fixed model badge showing configured model instead of actually running model after fallback switch
+- Fixed fallback chain using wrong phase configuration when restarting after rate limit
+
+---
+
 ## 2.7.2 - Stability & Performance Enhancements
 
 ### ✨ New Features
