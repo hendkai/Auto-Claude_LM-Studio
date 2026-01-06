@@ -335,67 +335,79 @@ export function AgentProfileSettings() {
                       {/* Model Fallback Chain */}
                       <div className="space-y-2">
                         <Label className="text-xs text-muted-foreground">{t('agentProfile.model')}</Label>
-                        {currentPhaseModelsV3[phase].map((fallback, index) => (
-                          <div key={index} className="flex items-center gap-2">
-                            <span className="text-xs min-w-[70px] text-muted-foreground">
-                              {index === 0 ? 'Primary:' : `Fallback ${index}:`}
-                            </span>
-                            <MultiProfileModelSelect
-                              value={fallback}
-                              onChange={(value) => handleUpdateFallback(phase, index, value)}
-                              placeholder={t('settings:modelSelect.placeholder')}
-                              className="flex-1"
-                            />
-                            {/* Reorder buttons */}
-                            {index > 0 && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleMoveFallbackUp(phase, index)}
-                                className="h-8 w-8"
-                                title="Move up"
-                              >
-                                <ChevronUp className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {index < currentPhaseModelsV3[phase].length - 1 && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleMoveFallbackDown(phase, index)}
-                                className="h-8 w-8"
-                                title="Move down"
-                              >
-                                <ChevronDown className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {/* Remove button */}
-                            {currentPhaseModelsV3[phase].length > 1 && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleRemoveFallback(phase, index)}
-                                className="h-8 w-8 text-destructive hover:text-destructive"
-                                title="Remove fallback"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </div>
-                        ))}
-                        {/* Add Fallback Button */}
+                        <div className="space-y-1.5">
+                          {currentPhaseModelsV3[phase].map((fallback, index) => (
+                            <div key={index} className="flex items-start gap-1.5">
+                              {/* Label */}
+                              <div className="pt-2 min-w-[60px]">
+                                <span className="text-[11px] text-muted-foreground">
+                                  {index === 0 ? 'Primary' : `FB ${index}`}
+                                </span>
+                              </div>
+
+                              {/* Model Select - more compact */}
+                              <div className="flex-1 min-w-0">
+                                <MultiProfileModelSelect
+                                  value={fallback}
+                                  onChange={(value) => handleUpdateFallback(phase, index, value)}
+                                  placeholder="Select model"
+                                  className="w-full"
+                                />
+                              </div>
+
+                              {/* Action Buttons - compact row */}
+                              <div className="flex items-center gap-0.5 pt-0.5">
+                                {index > 0 && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleMoveFallbackUp(phase, index)}
+                                    className="h-7 w-7 hover:bg-accent"
+                                    title="Move up"
+                                  >
+                                    <ChevronUp className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                                {index < currentPhaseModelsV3[phase].length - 1 && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleMoveFallbackDown(phase, index)}
+                                    className="h-7 w-7 hover:bg-accent"
+                                    title="Move down"
+                                  >
+                                    <ChevronDown className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                                {currentPhaseModelsV3[phase].length > 1 && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleRemoveFallback(phase, index)}
+                                    className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                    title="Remove"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Add Fallback Button - more compact */}
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
                           onClick={() => handleAddFallback(phase)}
-                          className="w-full text-xs h-8"
+                          className="w-full h-7 text-xs"
                         >
                           <Plus className="h-3 w-3 mr-1" />
-                          Add Fallback Model
+                          Add Fallback
                         </Button>
                       </div>
                       {/* Thinking Level Select */}
