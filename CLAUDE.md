@@ -11,7 +11,6 @@ Auto Claude is a multi-agent autonomous coding framework that builds software th
 ## Project Structure
 
 ```
-autonomous-coding/
 ├── apps/
 │   ├── backend/           # Python backend/CLI - ALL agent logic lives here
 │   │   ├── core/          # Client, auth, security
@@ -42,8 +41,8 @@ autonomous-coding/
 ### Setup
 
 **Requirements:**
-- Python 3.12+ (required for backend)
-- Node.js (for frontend)
+- Python 3.10+ (required for backend)
+- Node.js v24+ (for frontend)
 
 ```bash
 # Install all dependencies from root
@@ -111,7 +110,7 @@ python run.py --spec 001 --qa-status
 # Install test dependencies (required first time)
 cd apps/backend && uv pip install -r ../../tests/requirements-test.txt
 
-# Run all tests (use virtual environment pytest)
+# Run all backend tests (use virtual environment pytest)
 apps/backend/.venv/bin/pytest tests/ -v
 
 # Run single test file
@@ -125,6 +124,19 @@ apps/backend/.venv/bin/pytest tests/ -m "not slow"
 
 # Or from root
 npm run test:backend
+
+# Frontend tests
+cd apps/frontend && npm test              # Run unit tests
+cd apps/frontend && npm run test:watch    # Watch mode
+cd apps/frontend && npm run test:coverage # With coverage
+```
+
+### Frontend Linting & Type Checking
+```bash
+cd apps/frontend
+npm run lint           # Check for lint errors
+npm run lint:fix       # Auto-fix lint errors
+npm run typecheck      # TypeScript type checking
 ```
 
 ### Spec Validation
@@ -370,8 +382,11 @@ The frontend uses `react-i18next` for internationalization. All labels, buttons,
 - `settings.json` - Settings page content
 - `dialogs.json` - Dialog boxes and modals
 - `tasks.json` - Task/spec related content
+- `taskReview.json` - Task review UI content
+- `terminal.json` - Terminal-related UI content
 - `onboarding.json` - Onboarding wizard content
 - `welcome.json` - Welcome screen content
+- `gitlab.json` - GitLab integration content
 
 **Usage pattern:**
 ```tsx
