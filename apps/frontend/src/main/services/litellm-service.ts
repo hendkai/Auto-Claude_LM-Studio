@@ -3,8 +3,7 @@ import { EventEmitter } from 'events';
 import * as path from 'path';
 import * as fs from 'fs';
 import { app } from 'electron';
-import { getBackendPythonPath } from '../python-detector';
-import { parsePythonCommand } from '../agent/agent-process';
+import { findPythonCommand, parsePythonCommand } from '../python-detector';
 
 export interface LiteLLMStatus {
   isRunning: boolean;
@@ -165,7 +164,7 @@ litellm_settings:
     }
 
     // Get Python path
-    const pythonPath = getBackendPythonPath();
+    const pythonPath = findPythonCommand();
     if (!pythonPath) {
       throw new Error('Python not found. Cannot start LiteLLM.');
     }
