@@ -9,15 +9,11 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { Label } from '../ui/label';
 import { Switch } from '../ui/switch';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '../ui/select';
+
 import { Separator } from '../ui/separator';
 import { AVAILABLE_MODELS } from '../../../shared/constants';
+import { ModelSearchableSelect } from '../settings/ModelSearchableSelect';
+import { useSettingsStore } from '../../stores/settings-store';
 import type {
   Project,
   ProjectSettings as ProjectSettingsType,
@@ -44,6 +40,8 @@ export function GeneralSettings({
   handleInitialize
 }: GeneralSettingsProps) {
   const { t } = useTranslation(['settings']);
+  const { profiles, activeProfileId } = useSettingsStore();
+  const activeProfile = profiles.find(p => p.id === activeProfileId);
 
   return (
     <>
@@ -114,21 +112,14 @@ export function GeneralSettings({
             <h3 className="text-sm font-semibold text-foreground">Agent Configuration</h3>
             <div className="space-y-2">
               <Label htmlFor="model" className="text-sm font-medium text-foreground">Model</Label>
-              <Select
+              <ModelSearchableSelect
                 value={settings.model}
-                onValueChange={(value) => setSettings({ ...settings, model: value })}
-              >
-                <SelectTrigger id="model">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {AVAILABLE_MODELS.map((model) => (
-                    <SelectItem key={model.value} value={model.value}>
-                      {model.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onChange={(value) => setSettings({ ...settings, model: value })}
+                baseUrl={activeProfile?.baseUrl || ''}
+                apiKey={activeProfile?.apiKey || ''}
+                disabled={!activeProfile}
+                placeholder={activeProfile ? t('settings:modelSelect.placeholder') : "Select an API profile first"}
+              />
             </div>
             <div className="flex items-center justify-between pt-2">
               <div className="space-y-0.5">

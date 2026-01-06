@@ -55,8 +55,11 @@
 ## Requirements
 
 - **Claude Pro/Max subscription** - [Get one here](https://claude.ai/upgrade)
+  - **OR** Use a local LLM via LiteLLM proxy - [Setup guide](guides/LITELLM-SETUP.md)
 - **Claude Code CLI** - `npm install -g @anthropic-ai/claude-code`
 - **Git repository** - Your project must be initialized as a git repo
+
+> **💡 Running Local LLMs?** Auto Claude now supports local models (LM Studio, Ollama, etc.) via [LiteLLM proxy](guides/LITELLM-SETUP.md). No API costs required!
 
 ---
 
@@ -80,6 +83,7 @@
 | **Self-Validating QA** | Built-in quality assurance loop catches issues before you review |
 | **AI-Powered Merge** | Automatic conflict resolution when integrating back to main |
 | **Memory Layer** | Agents retain insights across sessions for smarter builds |
+| **Dynamic Model Selection** | Supports Anthropic API + local LLMs via LiteLLM (LM Studio, Ollama) |
 | **GitHub/GitLab Integration** | Import issues, investigate with AI, create merge requests |
 | **Linear Integration** | Sync tasks with Linear for team progress tracking |
 | **Cross-Platform** | Native desktop apps for Windows, macOS, and Linux |

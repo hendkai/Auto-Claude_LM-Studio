@@ -13,6 +13,8 @@ import {
   DEFAULT_FEATURE_THINKING,
   FEATURE_LABELS
 } from '../../../shared/constants';
+import { ModelSearchableSelect } from './ModelSearchableSelect';
+import { useSettingsStore } from '../../stores/settings-store';
 import type {
   AppSettings,
   FeatureModelConfig,
@@ -92,6 +94,8 @@ function ToolDetectionDisplay({ info, isLoading, t }: ToolDetectionDisplayProps)
  */
 export function GeneralSettings({ settings, onSettingsChange, section }: GeneralSettingsProps) {
   const { t } = useTranslation('settings');
+  const { profiles, activeProfileId } = useSettingsStore();
+  const activeProfile = profiles.find(p => p.id === activeProfileId);
   const [toolsInfo, setToolsInfo] = useState<{
     python: ToolDetectionResult;
     git: ToolDetectionResult;
@@ -192,24 +196,20 @@ export function GeneralSettings({ settings, onSettingsChange, section }: General
                       {/* Model Select */}
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">{t('general.model')}</Label>
-                        <Select
-                          value={featureModels[feature]}
-                          onValueChange={(value) => {
-                            const newFeatureModels = { ...featureModels, [feature]: value as ModelTypeShort };
-                            onSettingsChange({ ...settings, featureModels: newFeatureModels });
-                          }}
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {AVAILABLE_MODELS.map((m) => (
-                              <SelectItem key={m.value} value={m.value}>
-                                {m.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">{t('general.model')}</Label>
+                          <ModelSearchableSelect
+                            value={featureModels[feature]}
+                            onChange={(value) => {
+                              const newFeatureModels = { ...featureModels, [feature]: value as ModelTypeShort };
+                              onSettingsChange({ ...settings, featureModels: newFeatureModels });
+                            }}
+                            baseUrl={activeProfile?.baseUrl || ''}
+                            apiKey={activeProfile?.apiKey || ''}
+                            disabled={!activeProfile}
+                            placeholder={activeProfile ? t('settings:modelSelect.placeholder') : "Select an API profile first"}
+                          />
+                        </div>
                       </div>
                       {/* Thinking Level Select */}
                       <div className="space-y-1">

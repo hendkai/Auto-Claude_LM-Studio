@@ -10,6 +10,7 @@ import {
   DEFAULT_PHASE_THINKING
 } from '../../../shared/constants';
 import { useSettingsStore, saveSettings } from '../../stores/settings-store';
+import { ModelSearchableSelect } from './ModelSearchableSelect';
 import { SettingsSection } from './SettingsSection';
 import { Label } from '../ui/label';
 import { Button } from '../ui/button';
@@ -42,9 +43,12 @@ const PHASE_KEYS: Array<keyof PhaseModelConfig> = ['spec', 'planning', 'coding',
  */
 export function AgentProfileSettings() {
   const { t } = useTranslation('settings');
-  const settings = useSettingsStore((state) => state.settings);
+  const { settings, profiles, activeProfileId } = useSettingsStore();
   const selectedProfileId = settings.selectedAgentProfile || 'auto';
   const [showPhaseConfig, setShowPhaseConfig] = useState(true);
+
+  // Get active API profile for model fetching
+  const activeProfile = profiles.find(p => p.id === activeProfileId);
 
   // Find the selected profile
   const selectedProfile = useMemo(() =>
@@ -271,21 +275,14 @@ export function AgentProfileSettings() {
                       {/* Model Select */}
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">{t('agentProfile.model')}</Label>
-                        <Select
+                        <ModelSearchableSelect
                           value={currentPhaseModels[phase]}
-                          onValueChange={(value) => handlePhaseModelChange(phase, value as ModelTypeShort)}
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {AVAILABLE_MODELS.map((m) => (
-                              <SelectItem key={m.value} value={m.value}>
-                                {m.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          onChange={(value) => handlePhaseModelChange(phase, value as ModelTypeShort)}
+                          baseUrl={activeProfile?.baseUrl || ''}
+                          apiKey={activeProfile?.apiKey || ''}
+                          disabled={!activeProfile}
+                          placeholder={activeProfile ? t('settings:modelSelect.placeholder') : "Select an API profile first"}
+                        />
                       </div>
                       {/* Thinking Level Select */}
                       <div className="space-y-1">

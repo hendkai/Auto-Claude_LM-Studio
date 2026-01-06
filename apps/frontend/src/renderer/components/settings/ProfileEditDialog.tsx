@@ -153,6 +153,10 @@ export function ProfileEditDialog({ open, onOpenChange, onSaved, profile }: Prof
     if (!name.trim()) {
       setName(t(preset.labelKey));
     }
+    // Auto-fill dummy API key for LM Studio to simplify UX
+    if (id === 'lm-studio') {
+      setApiKey('lm-studio');
+    }
   };
 
   // Validate form
@@ -453,31 +457,28 @@ export function ProfileEditDialog({ open, onOpenChange, onSaved, profile }: Prof
 
           {/* Inline connection test result */}
           {showTestResult && testConnectionResult && (
-            <div className={`flex items-start gap-2 p-3 rounded-lg border ${
-              testConnectionResult.success
+            <div className={`flex items-start gap-2 p-3 rounded-lg border ${testConnectionResult.success
                 ? 'bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800'
                 : 'bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800'
-            }`}>
+              }`}>
               {testConnectionResult.success ? (
                 <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
               ) : (
                 <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
               )}
               <div className="flex-1 min-w-0">
-                <p className={`text-sm font-medium ${
-                  testConnectionResult.success
+                <p className={`text-sm font-medium ${testConnectionResult.success
                     ? 'text-green-800 dark:text-green-200'
                     : 'text-red-800 dark:text-red-200'
-                }`}>
+                  }`}>
                   {testConnectionResult.success
                     ? t('settings:apiProfiles.testConnection.success')
                     : t('settings:apiProfiles.testConnection.failure')}
                 </p>
-                <p className={`text-sm ${
-                  testConnectionResult.success
+                <p className={`text-sm ${testConnectionResult.success
                     ? 'text-green-700 dark:text-green-300'
                     : 'text-red-700 dark:text-red-300'
-                }`}>
+                  }`}>
                   {testConnectionResult.message}
                 </p>
               </div>

@@ -1,0 +1,10 @@
+model_list:
+  - model_name: local-model
+    litellm_params:
+      model: openai/local-model
+      api_base: "http://localhost:1234/v1"
+      api_key: "lm-studio"
+
+litellm_settings:
+  drop_params: true
+  set_verbose: true
