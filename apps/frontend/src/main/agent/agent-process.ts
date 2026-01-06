@@ -14,7 +14,7 @@ import { parsePythonCommand, validatePythonPath } from '../python-detector';
 import { pythonEnvManager, getConfiguredPythonPath } from '../python-env-manager';
 import { buildMemoryEnvVars } from '../memory-env-builder';
 import { readSettingsFile } from '../settings-utils';
-import type { AppSettings, PhaseModelConfigV2 } from '../../shared/types/settings';
+import type { AppSettings, PhaseModelConfigV2, ProfileModelPair } from '../../shared/types/settings';
 import { getOAuthModeClearVars } from './env-utils';
 import { getAugmentedEnv } from '../env-utils';
 
@@ -340,23 +340,29 @@ export class AgentProcessManager {
     const pythonEnv = pythonEnvManager.getPythonEnv();
 
     // Get API profile environment variables
-    // Try to use phase-specific profile from settings, fallback to active profile
+    // V3: Use fallback chain (array of ProfileModelPair per phase)
     let apiProfileEnv: Record<string, string> = {};
+    let fallbackChain: ProfileModelPair[] = [];
+    let currentFallbackIndex = 0; // Start with primary model
+
     try {
       // Load settings to check for phase-specific configuration
       const settings = await readSettingsFile();
-      const phaseModelsV2 = settings?.customPhaseModelsV2 as PhaseModelConfigV2 | undefined;
+      const phaseModelsV3 = settings?.customPhaseModelsV3 as import('../../shared/types/settings').PhaseModelConfigV3 | undefined;
 
       // Determine initial phase (spec-runner starts in spec, others in planning)
       const initialPhase: 'spec' | 'planning' | 'coding' | 'qa' = isSpecRunner ? 'spec' : 'planning';
 
-      // If phase-specific config exists, use it
-      if (phaseModelsV2 && phaseModelsV2[initialPhase]) {
-        console.log(`[AgentProcess] Using phase-specific profile for ${initialPhase}:`, phaseModelsV2[initialPhase]);
-        apiProfileEnv = await getProfileEnvForPair(phaseModelsV2[initialPhase]);
+      // If V3 config exists, use fallback chain
+      if (phaseModelsV3 && phaseModelsV3[initialPhase] && phaseModelsV3[initialPhase].length > 0) {
+        fallbackChain = phaseModelsV3[initialPhase];
+        const primaryModel = fallbackChain[0];
+        console.log(`[AgentProcess] Using phase-specific profile for ${initialPhase}:`, primaryModel);
+        console.log(`[AgentProcess] Fallback chain length: ${fallbackChain.length}`);
+        apiProfileEnv = await getProfileEnvForPair(primaryModel);
       } else {
         // Fallback to active profile
-        console.log('[AgentProcess] No phase-specific config, using active profile');
+        console.log('[AgentProcess] No V3 phase config, using active profile');
         apiProfileEnv = await getAPIProfileEnv();
       }
     } catch (error) {
