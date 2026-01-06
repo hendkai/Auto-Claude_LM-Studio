@@ -2557,6 +2557,14 @@ export function registerWorktreeHandlers(
           return { success: false, error: 'Task not found' };
         }
 
+        if (!project.path || typeof project.path !== 'string') {
+          return { success: false, error: 'Project path is invalid' };
+        }
+
+        if (!existsSync(project.path)) {
+          return { success: false, error: 'Project directory does not exist' };
+        }
+
         if (!commitMessage || commitMessage.trim() === '') {
           return { success: false, error: 'Commit message is required' };
         }
@@ -2615,6 +2623,14 @@ export function registerWorktreeHandlers(
         const { task, project } = findTaskAndProject(taskId);
         if (!task || !project) {
           return { success: false, error: 'Task not found' };
+        }
+
+        if (!project.path || typeof project.path !== 'string') {
+          return { success: false, error: 'Project path is invalid' };
+        }
+
+        if (!existsSync(project.path)) {
+          return { success: false, error: 'Project directory does not exist' };
         }
 
         // Stash changes with optional message
