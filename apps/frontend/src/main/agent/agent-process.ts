@@ -14,7 +14,7 @@ import { parsePythonCommand, validatePythonPath } from '../python-detector';
 import { pythonEnvManager, getConfiguredPythonPath } from '../python-env-manager';
 import { buildMemoryEnvVars } from '../memory-env-builder';
 import { readSettingsFile } from '../settings-utils';
-import type { AppSettings } from '../../shared/types/settings';
+import type { AppSettings, PhaseModelConfigV2 } from '../../shared/types/settings';
 import { getOAuthModeClearVars } from './env-utils';
 import { getAugmentedEnv } from '../env-utils';
 
@@ -345,7 +345,7 @@ export class AgentProcessManager {
     try {
       // Load settings to check for phase-specific configuration
       const settings = await readSettingsFile();
-      const phaseModelsV2 = settings?.customPhaseModelsV2;
+      const phaseModelsV2: PhaseModelConfigV2 | undefined = settings?.customPhaseModelsV2;
 
       // Determine initial phase (spec-runner starts in spec, others in planning)
       const initialPhase: 'spec' | 'planning' | 'coding' | 'qa' = isSpecRunner ? 'spec' : 'planning';

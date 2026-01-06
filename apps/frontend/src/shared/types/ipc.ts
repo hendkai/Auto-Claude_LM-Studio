@@ -124,7 +124,8 @@ import type {
   GitLabInvestigationStatus,
   GitLabMRReviewResult,
   GitLabMRReviewProgress,
-  GitLabNewCommitsCheck
+  GitLabNewCommitsCheck,
+  GiteaSyncStatus
 } from './integrations';
 import type { APIProfile, ProfilesFile, TestConnectionResult, DiscoverModelsResult } from './profile';
 
@@ -421,6 +422,9 @@ export interface ElectronAPI {
   onGitHubInvestigationError: (
     callback: (projectId: string, error: string) => void
   ) => () => void;
+
+  // Gitea integration operations
+  checkGiteaConnection: (projectId: string) => Promise<IPCResult<GiteaSyncStatus>>;
 
   // GitLab integration operations
   getGitLabProjects: (projectId: string) => Promise<IPCResult<GitLabProject[]>>;

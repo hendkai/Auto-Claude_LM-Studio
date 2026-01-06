@@ -14,7 +14,7 @@ import path from 'path';
 import { IPC_CHANNELS } from '../../shared/constants/ipc';
 import type { IPCResult } from '../../shared/types';
 import type { ClaudeCodeVersionInfo } from '../../shared/types/cli';
-import { getToolInfo } from '../cli-tool-manager';
+import { getToolInfo, getToolInfoAsync } from '../cli-tool-manager';
 import { readSettingsFile } from '../settings-utils';
 import semver from 'semver';
 
@@ -517,7 +517,8 @@ export function registerClaudeCodeHandlers(): void {
         // Get installed version via cli-tool-manager
         let detectionResult;
         try {
-          detectionResult = getToolInfo('claude');
+          // detectionResult = getToolInfo('claude');
+          detectionResult = await getToolInfoAsync('claude');
           console.log('[Claude Code] Detection result:', JSON.stringify(detectionResult, null, 2));
         } catch (detectionError) {
           console.error('[Claude Code] Detection error:', detectionError);

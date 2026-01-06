@@ -345,7 +345,22 @@ class WorktreeManager:
             self._run_git(["worktree", "remove", "--force", str(worktree_path)])
 
         # Delete branch if it exists (from previous attempt)
-        self._run_git(["branch", "-D", branch_name])
+        delete_result = self._run_git(["branch", "-D", branch_name])
+        
+        # If deletion failed, it might be locked by a stale worktree
+        if delete_result.returncode != 0:
+            # Check for "used by worktree at" in stderr
+            match = re.search(r"used by worktree at '(.*?)'", delete_result.stderr)
+            if match:
+                stale_path = Path(match.group(1))
+                print(f"Found stale worktree blocking branch: {stale_path}")
+                if stale_path.exists():
+                    print(f"Removing stale worktree directory: {stale_path}")
+                    shutil.rmtree(stale_path, ignore_errors=True)
+            
+            # Prune and retry branch deletion
+            self._run_git(["worktree", "prune"])
+            self._run_git(["branch", "-D", branch_name])
 
         # Fetch latest from remote to ensure we have the most up-to-date code
         # GitHub/remote is the source of truth, not the local branch

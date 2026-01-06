@@ -232,7 +232,7 @@ export const IPC_CHANNELS = {
   GITHUB_INVESTIGATION_COMPLETE: 'github:investigationComplete',
   GITHUB_INVESTIGATION_ERROR: 'github:investigationError',
 
-// GitLab integration
+  // GitLab integration
   GITLAB_GET_PROJECTS: 'gitlab:getProjects',
   GITLAB_GET_ISSUES: 'gitlab:getIssues',
   GITLAB_GET_ISSUE: 'gitlab:getIssue',
@@ -241,6 +241,9 @@ export const IPC_CHANNELS = {
   GITLAB_INVESTIGATE_ISSUE: 'gitlab:investigateIssue',
   GITLAB_IMPORT_ISSUES: 'gitlab:importIssues',
   GITLAB_CREATE_RELEASE: 'gitlab:createRelease',
+
+  // Gitea integration
+  GITEA_CHECK_CONNECTION: 'gitea:check-connection',
 
   // GitLab Merge Requests (equivalent to GitHub PRs)
   GITLAB_GET_MERGE_REQUESTS: 'gitlab:getMergeRequests',

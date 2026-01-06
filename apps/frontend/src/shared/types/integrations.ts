@@ -273,6 +273,19 @@ export interface GitLabInvestigationStatus {
 }
 
 // ============================================
+// Gitea Integration Types
+// ============================================
+
+export interface GiteaSyncStatus {
+  connected: boolean;
+  instanceUrl?: string;
+  repoFullName?: string; // owner/repo
+  issueCount?: number;
+  lastSyncedAt?: string;
+  error?: string;
+}
+
+// ============================================
 // GitLab MR Review Types
 // ============================================
 

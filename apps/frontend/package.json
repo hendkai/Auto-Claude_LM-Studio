@@ -140,16 +140,9 @@
     "dmg-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.autoclaude.ui",
-    "productName": "Auto-Claude",
+    "appId": "com.autoclaude.lmstudio",
+    "productName": "Auto-Claude_LM-Studio",
     "artifactName": "${productName}-${version}-${platform}-${arch}.${ext}",
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "AndyMik90",
-        "repo": "Auto-Claude"
-      }
-    ],
     "directories": {
       "output": "dist",
       "buildResources": "resources"

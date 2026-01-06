@@ -1,11 +1,12 @@
 import { useTranslation } from 'react-i18next';
-import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo, ProjectEnvConfig, LinearSyncStatus, GitHubSyncStatus, GitLabSyncStatus } from '../../../../shared/types';
+import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo, ProjectEnvConfig, LinearSyncStatus, GitHubSyncStatus, GitLabSyncStatus, GiteaSyncStatus } from '../../../../shared/types';
 import { SettingsSection } from '../SettingsSection';
 import { GeneralSettings } from '../../project-settings/GeneralSettings';
 import { SecuritySettings } from '../../project-settings/SecuritySettings';
 import { LinearIntegration } from '../integrations/LinearIntegration';
 import { GitHubIntegration } from '../integrations/GitHubIntegration';
 import { GitLabIntegration } from '../integrations/GitLabIntegration';
+import { GiteaIntegration } from '../integrations/GiteaIntegration';
 import { InitializationGuard } from '../common/InitializationGuard';
 import type { ProjectSettingsSection } from '../ProjectSettingsContent';
 
@@ -33,6 +34,8 @@ interface SectionRouterProps {
   setShowGitLabToken: React.Dispatch<React.SetStateAction<boolean>>;
   gitLabConnectionStatus: GitLabSyncStatus | null;
   isCheckingGitLab: boolean;
+  giteaConnectionStatus: GiteaSyncStatus | null; // Added type import below
+  isCheckingGitea: boolean;
   linearConnectionStatus: LinearSyncStatus | null;
   isCheckingLinear: boolean;
   handleInitialize: () => Promise<void>;
@@ -67,6 +70,8 @@ export function SectionRouter({
   setShowGitLabToken,
   gitLabConnectionStatus,
   isCheckingGitLab,
+  giteaConnectionStatus,
+  isCheckingGitea,
   linearConnectionStatus,
   isCheckingLinear,
   handleInitialize,
@@ -169,6 +174,27 @@ export function SectionRouter({
         </SettingsSection>
       );
 
+    case 'gitea':
+      return (
+        <SettingsSection
+          title={t('projectSections.gitea.integrationTitle')}
+          description={t('projectSections.gitea.integrationDescription')}
+        >
+          <InitializationGuard
+            initialized={!!project.autoBuildPath}
+            title={t('projectSections.gitea.integrationTitle')}
+            description={t('projectSections.gitea.syncDescription')}
+          >
+            <GiteaIntegration
+              envConfig={envConfig}
+              updateEnvConfig={updateEnvConfig}
+              giteaConnectionStatus={giteaConnectionStatus}
+              isCheckingGitea={isCheckingGitea}
+            />
+          </InitializationGuard>
+        </SettingsSection>
+      );
+
     case 'memory':
       return (
         <SettingsSection
@@ -188,7 +214,7 @@ export function SectionRouter({
               showOpenAIKey={showOpenAIKey}
               setShowOpenAIKey={setShowOpenAIKey}
               expanded={true}
-              onToggle={() => {}}
+              onToggle={() => { }}
             />
           </InitializationGuard>
         </SettingsSection>

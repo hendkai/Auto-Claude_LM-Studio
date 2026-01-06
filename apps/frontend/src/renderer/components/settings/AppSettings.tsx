@@ -27,7 +27,7 @@ function GitLabIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor" role="img" aria-labelledby="gitlab-icon-title">
       <title id="gitlab-icon-title">GitLab</title>
-      <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 0 1-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 0 1 4.82 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0 1 18.6 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.51L23 13.45a.84.84 0 0 1-.35.94z"/>
+      <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 0 1-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 0 1 4.82 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0 1 18.6 2a.43.43 0 0 1 .58 0 .42.42 0 0 1 .11.18l2.44 7.51L23 13.45a.84.84 0 0 1-.35.94z" />
     </svg>
   );
 }
@@ -93,6 +93,14 @@ const projectNavItemsConfig: NavItemConfig<ProjectSettingsSection>[] = [
   { id: 'linear', icon: Zap },
   { id: 'github', icon: Github },
   { id: 'gitlab', icon: GitLabIcon },
+  {
+    id: 'gitea', icon: ({ className }) => (
+      <svg className={className} viewBox="0 0 24 24" fill="currentColor" role="img" aria-labelledby="gitea-nav-icon">
+        <title id="gitea-nav-icon">Gitea</title>
+        <path d="M19.14 7.5A2.86 2.86 0 0 1 22 10.36v3.78A2.86 2.86 0 0 1 19.14 17H12a2 2 0 0 0-2 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2.36A4.64 4.64 0 0 1 8.64 15h2.22v-.86A2.86 2.86 0 0 1 8 11.28V7.5a2.86 2.86 0 0 1 2.86-2.86h8.28A2.86 2.86 0 0 1 19.14 7.5zm-5.07 7.14H19a1.79 1.79 0 0 0 1.79-1.79v-2.5a1.79 1.79 0 0 0-1.79-1.79h-5.93zM13 13.5a1 1 0 1 0-2 0 1 1 0 0 0 2 0z" />
+      </svg>
+    )
+  },
   { id: 'memory', icon: Database }
 ];
 
@@ -154,7 +162,7 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
 
     // If on project section with a project selected, save project settings too
     if (activeTopLevel === 'project' && selectedProject && projectSettingsHook) {
-      await projectSettingsHook.handleSave(() => {});
+      await projectSettingsHook.handleSave(() => { });
       // Check for project errors
       if (projectSettingsHook.error || projectSettingsHook.envError) {
         setProjectError(projectSettingsHook.error || projectSettingsHook.envError);

@@ -246,12 +246,12 @@ export interface GraphitiMemoryState {
   error_log: Array<{ timestamp: string; error: string }>;
 }
 
-export type MemoryType = 
-  | 'session_insight' 
-  | 'codebase_discovery' 
-  | 'codebase_map' 
-  | 'pattern' 
-  | 'gotcha' 
+export type MemoryType =
+  | 'session_insight'
+  | 'codebase_discovery'
+  | 'codebase_map'
+  | 'pattern'
+  | 'gotcha'
   | 'task_outcome'
   | 'pr_review'
   | 'pr_finding'
@@ -317,6 +317,13 @@ export interface ProjectEnvConfig {
   gitlabToken?: string;
   gitlabProject?: string; // Format: group/project or numeric ID
   gitlabAutoSync?: boolean; // Auto-sync issues on project load
+
+  // Gitea Integration
+  giteaEnabled: boolean;
+  giteaInstanceUrl?: string; // Default: https://gitea.com or self-hosted
+  giteaToken?: string;
+  giteaRepo?: string; // Format: owner/repo
+  giteaAutoSync?: boolean; // Auto-sync issues on project load
 
   // Git/Worktree Settings
   defaultBranch?: string; // Base branch for worktree creation (e.g., 'main', 'develop')

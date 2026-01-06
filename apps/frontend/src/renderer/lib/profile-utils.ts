@@ -41,7 +41,7 @@ export function isValidApiKey(key: string): boolean {
   }
 
   const trimmed = key.trim();
-  if (trimmed.length < 12) {
+  if (trimmed.length < 8) {
     return false;
   }
 

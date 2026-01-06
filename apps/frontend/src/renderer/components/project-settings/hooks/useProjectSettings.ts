@@ -12,7 +12,8 @@ import type {
   ProjectEnvConfig,
   LinearSyncStatus,
   GitHubSyncStatus,
-  GitLabSyncStatus
+  GitLabSyncStatus,
+  GiteaSyncStatus
 } from '../../../../shared/types';
 
 export interface UseProjectSettingsReturn {
@@ -60,6 +61,10 @@ export interface UseProjectSettingsReturn {
   setShowGitLabToken: React.Dispatch<React.SetStateAction<boolean>>;
   gitLabConnectionStatus: GitLabSyncStatus | null;
   isCheckingGitLab: boolean;
+
+  // Gitea state
+  giteaConnectionStatus: GiteaSyncStatus | null;
+  isCheckingGitea: boolean;
 
   // Claude auth state
   isCheckingClaudeAuth: boolean;
@@ -118,6 +123,10 @@ export function useProjectSettings(
   const [showGitLabToken, setShowGitLabToken] = useState(false);
   const [gitLabConnectionStatus, setGitLabConnectionStatus] = useState<GitLabSyncStatus | null>(null);
   const [isCheckingGitLab, setIsCheckingGitLab] = useState(false);
+
+  // Gitea state
+  const [giteaConnectionStatus, setGiteaConnectionStatus] = useState<GiteaSyncStatus | null>(null);
+  const [isCheckingGitea, setIsCheckingGitea] = useState(false);
 
   // Claude auth state
   const [isCheckingClaudeAuth, setIsCheckingClaudeAuth] = useState(false);
@@ -272,6 +281,33 @@ export function useProjectSettings(
     }
   }, [envConfig?.gitlabEnabled, envConfig?.gitlabToken, envConfig?.gitlabProject, project.id]);
 
+  // Check Gitea connection when token/repo/url changes
+  useEffect(() => {
+    const checkGiteaConnection = async () => {
+      if (!envConfig?.giteaEnabled || !envConfig.giteaToken || !envConfig.giteaInstanceUrl) {
+        setGiteaConnectionStatus(null);
+        return;
+      }
+
+      setIsCheckingGitea(true);
+      try {
+        // @ts-ignore - API method will be added in next step
+        const status = await window.electronAPI.checkGiteaConnection(project.id);
+        if (status.success && status.data) {
+          setGiteaConnectionStatus(status.data);
+        }
+      } catch {
+        setGiteaConnectionStatus({ connected: false, error: 'Failed to check connection' });
+      } finally {
+        setIsCheckingGitea(false);
+      }
+    };
+
+    if (envConfig?.giteaEnabled && envConfig.giteaToken && envConfig.giteaInstanceUrl) {
+      checkGiteaConnection();
+    }
+  }, [envConfig?.giteaEnabled, envConfig?.giteaToken, envConfig?.giteaInstanceUrl, envConfig?.giteaRepo, project.id]);
+
   const toggleSection = (section: string) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
@@ -411,6 +447,8 @@ export function useProjectSettings(
     setShowGitLabToken,
     gitLabConnectionStatus,
     isCheckingGitLab,
+    giteaConnectionStatus,
+    isCheckingGitea,
     isCheckingClaudeAuth,
     claudeAuthStatus,
     setClaudeAuthStatus,

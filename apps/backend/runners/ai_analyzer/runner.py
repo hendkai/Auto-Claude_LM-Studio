@@ -10,6 +10,7 @@ from typing import Any
 from .analyzers import AnalyzerFactory
 from .cache_manager import CacheManager
 from .claude_client import CLAUDE_SDK_AVAILABLE, ClaudeAnalysisClient
+from .lm_studio_client import LMStudioAnalysisClient
 from .cost_estimator import CostEstimator
 from .models import AnalyzerType
 from .result_parser import ResultParser
@@ -55,8 +56,17 @@ class AIAnalyzerRunner:
             return cached_result
 
         if not CLAUDE_SDK_AVAILABLE:
-            print("✗ Claude Agent SDK not available. Cannot run AI analysis.")
-            return {"error": "Claude SDK not installed"}
+            # Fallback to LM Studio if Claude SDK is not available
+            print("ℹ️  Claude Agent SDK not available. Using LM Studio Client.")
+        
+        # Determine provider (env var or fallback)
+        import os
+        self.ai_provider = os.getenv("AI_PROVIDER", "claude" if CLAUDE_SDK_AVAILABLE else "lm_studio")
+        
+        if self.ai_provider == "claude" and not CLAUDE_SDK_AVAILABLE:
+             print("✗ Claude SDK requested but not installed.")
+             return {"error": "Claude SDK not installed"}
+
 
         # Estimate cost before running
         cost_estimate = self.cost_estimator.estimate_cost()
@@ -157,9 +167,13 @@ class AIAnalyzerRunner:
         prompt = analyzer.get_prompt()
         default_result = analyzer.get_default_result()
 
-        # Run Claude query
-        client = ClaudeAnalysisClient(self.project_dir)
-        response = await client.run_analysis_query(prompt)
+        # Run Query with selected client
+        if self.ai_provider == "lm_studio":
+            client = LMStudioAnalysisClient(self.project_dir)
+            response = await client.run_analysis_query(prompt)
+        else:
+            client = ClaudeAnalysisClient(self.project_dir)
+            response = await client.run_analysis_query(prompt)
 
         # Parse and return result
         return self.result_parser.parse_json_response(response, default_result)

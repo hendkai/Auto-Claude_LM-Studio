@@ -59,7 +59,8 @@
       "openrouter": "OpenRouter",
       "groq": "Groq",
       "glmGlobal": "GLM (Global)",
-      "glmChina": "GLM (China)"
+      "glmChina": "GLM (China)",
+      "lmStudio": "LM Studio"
     },
     "fields": {
       "name": "Name",
@@ -338,6 +339,13 @@
       "integrationTitle": "GitLab Integration",
       "integrationDescription": "Connect to GitLab for issue tracking",
       "syncDescription": "Sync with GitLab Issues"
+    },
+    "gitea": {
+      "title": "Gitea",
+      "description": "Gitea issues sync",
+      "integrationTitle": "Gitea Integration",
+      "integrationDescription": "Connect to Gitea for issue tracking",
+      "syncDescription": "Sync with Gitea Issues"
     },
     "memory": {
       "title": "Memory",
