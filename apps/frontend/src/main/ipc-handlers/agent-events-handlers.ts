@@ -13,7 +13,7 @@ import { titleGenerator } from '../title-generator';
 import { fileWatcher } from '../file-watcher';
 import { projectStore } from '../project-store';
 import { notificationService } from '../notification-service';
-import { persistPlanStatusSync, getPlanPath } from './task/plan-file-utils';
+import { persistPlanStatus, persistPlanStatusSync, getPlanPath } from './task/plan-file-utils';
 
 
 /**
@@ -58,26 +58,33 @@ export function registerAgenteventsHandlers(
   });
 
   agentManager.on('exit', (taskId: string, code: number | null, processType: ProcessType) => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      // Send final plan state to renderer BEFORE unwatching
-      // This ensures the renderer has the final subtask data (fixes 0/0 subtask bug)
-      const finalPlan = fileWatcher.getCurrentPlan(taskId);
-      if (finalPlan && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(IPC_CHANNELS.TASK_PROGRESS, taskId, finalPlan);
-      }
-
-      fileWatcher.unwatch(taskId);
-
-      if (processType === 'spec-creation') {
-        console.warn(`[Task ${taskId}] Spec creation completed with code ${code}`);
+    // Wrap in setImmediate to prevent blocking the event loop
+    // This allows the process exit event to complete quickly
+    setImmediate(async () => {
+      const mainWindow = getMainWindow();
+      if (!mainWindow || mainWindow.isDestroyed()) {
         return;
       }
 
-      let task: Task | undefined;
-      let project: Project | undefined;
-
       try {
+        // Send final plan state to renderer BEFORE unwatching
+        // This ensures the renderer has the final subtask data (fixes 0/0 subtask bug)
+        const finalPlan = fileWatcher.getCurrentPlan(taskId);
+        if (finalPlan && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(IPC_CHANNELS.TASK_PROGRESS, taskId, finalPlan);
+        }
+
+        // Await unwatch to ensure watcher is properly closed
+        await fileWatcher.unwatch(taskId);
+
+        if (processType === 'spec-creation') {
+          console.warn(`[Task ${taskId}] Spec creation completed with code ${code}`);
+          return;
+        }
+
+        let task: Task | undefined;
+        let project: Project | undefined;
+
         const projects = projectStore.getProjects();
 
         for (const p of projects) {
@@ -93,11 +100,15 @@ export function registerAgenteventsHandlers(
           const taskTitle = task.title || task.specId;
           const planPath = getPlanPath(project, task);
 
-          // Use shared utility for persisting status (prevents race conditions)
-          const persistStatus = (status: TaskStatus) => {
-            const persisted = persistPlanStatusSync(planPath, status);
-            if (persisted) {
-              console.log(`[Task ${taskId}] Persisted status to plan: ${status}`);
+          // Use async persistPlanStatus to avoid blocking the event loop
+          const persistStatus = async (status: TaskStatus) => {
+            try {
+              const persisted = await persistPlanStatus(planPath, status);
+              if (persisted) {
+                console.log(`[Task ${taskId}] Persisted status to plan: ${status}`);
+              }
+            } catch (err) {
+              console.warn(`[Task ${taskId}] Failed to persist status:`, err);
             }
           };
 
@@ -113,7 +124,8 @@ export function registerAgenteventsHandlers(
             
             if (isActiveStatus && !hasIncompleteSubtasks) {
               console.log(`[Task ${taskId}] Fallback: Moving to human_review (process exited successfully)`);
-              persistStatus('human_review');
+              // Fire and forget - don't block on file write
+              void persistStatus('human_review');
               // Check if window is still available before sending
               if (!mainWindow.isDestroyed()) {
                 mainWindow.webContents.send(
@@ -125,7 +137,8 @@ export function registerAgenteventsHandlers(
             }
           } else {
             notificationService.notifyTaskFailed(taskTitle, project.id, taskId);
-            persistStatus('human_review');
+            // Fire and forget - don't block on file write
+            void persistStatus('human_review');
             // Check if window is still available before sending
             if (!mainWindow.isDestroyed()) {
               mainWindow.webContents.send(
@@ -139,12 +152,16 @@ export function registerAgenteventsHandlers(
       } catch (error) {
         console.error(`[Task ${taskId}] Exit handler error:`, error);
       }
-    }
+    });
   });
 
   agentManager.on('execution-progress', (taskId: string, progress: ExecutionProgressData) => {
     const mainWindow = getMainWindow();
-    if (mainWindow) {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+
+    try {
       mainWindow.webContents.send(IPC_CHANNELS.TASK_EXECUTION_PROGRESS, taskId, progress);
 
       const phaseToStatus: Record<string, TaskStatus | null> = {
@@ -159,32 +176,40 @@ export function registerAgenteventsHandlers(
 
       const newStatus = phaseToStatus[progress.phase];
       if (newStatus) {
-        mainWindow.webContents.send(
-          IPC_CHANNELS.TASK_STATUS_CHANGE,
-          taskId,
-          newStatus
-        );
+        // Check again before sending status change
+        if (!mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(
+            IPC_CHANNELS.TASK_STATUS_CHANGE,
+            taskId,
+            newStatus
+          );
+        }
 
         // CRITICAL: Persist status to plan file to prevent flip-flop on task list refresh
         // When getTasks() is called, it reads status from the plan file. Without persisting,
         // the status in the file might differ from the UI, causing inconsistent state.
         // Uses shared utility with locking to prevent race conditions.
-        try {
-          const projects = projectStore.getProjects();
-          for (const p of projects) {
-            const tasks = projectStore.getTasks(p.id);
-            const task = tasks.find((t) => t.id === taskId || t.specId === taskId);
-            if (task) {
-              const planPath = getPlanPath(p, task);
-              persistPlanStatusSync(planPath, newStatus);
-              break;
+        // Fire and forget - don't block the event loop on file writes
+        setImmediate(async () => {
+          try {
+            const projects = projectStore.getProjects();
+            for (const p of projects) {
+              const tasks = projectStore.getTasks(p.id);
+              const task = tasks.find((t) => t.id === taskId || t.specId === taskId);
+              if (task) {
+                const planPath = getPlanPath(p, task);
+                await persistPlanStatus(planPath, newStatus);
+                break;
+              }
             }
+          } catch (err) {
+            // Ignore persistence errors - UI will still work, just might flip on refresh
+            console.warn('[execution-progress] Could not persist status:', err);
           }
-        } catch (err) {
-          // Ignore persistence errors - UI will still work, just might flip on refresh
-          console.warn('[execution-progress] Could not persist status:', err);
-        }
+        });
       }
+    } catch (error) {
+      console.error(`[execution-progress] Error handling progress for task ${taskId}:`, error);
     }
   });
 

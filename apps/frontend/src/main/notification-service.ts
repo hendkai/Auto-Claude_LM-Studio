@@ -28,11 +28,18 @@ class NotificationService {
    * Send a notification for task completion
    */
   notifyTaskComplete(taskTitle: string, projectId: string, taskId: string): void {
-    this.sendNotification('task-complete', {
-      title: 'Task Complete',
-      body: `"${taskTitle}" has completed and is ready for review`,
-      projectId,
-      taskId
+    // Wrap in setImmediate to prevent blocking if projectStore.getProjects() is slow
+    setImmediate(() => {
+      try {
+        this.sendNotification('task-complete', {
+          title: 'Task Complete',
+          body: `"${taskTitle}" has completed and is ready for review`,
+          projectId,
+          taskId
+        });
+      } catch (error) {
+        console.error('[NotificationService] Error sending task complete notification:', error);
+      }
     });
   }
 
@@ -40,11 +47,18 @@ class NotificationService {
    * Send a notification for task failure
    */
   notifyTaskFailed(taskTitle: string, projectId: string, taskId: string): void {
-    this.sendNotification('task-failed', {
-      title: 'Task Failed',
-      body: `"${taskTitle}" encountered an error`,
-      projectId,
-      taskId
+    // Wrap in setImmediate to prevent blocking if projectStore.getProjects() is slow
+    setImmediate(() => {
+      try {
+        this.sendNotification('task-failed', {
+          title: 'Task Failed',
+          body: `"${taskTitle}" encountered an error`,
+          projectId,
+          taskId
+        });
+      } catch (error) {
+        console.error('[NotificationService] Error sending task failed notification:', error);
+      }
     });
   }
 
@@ -52,11 +66,18 @@ class NotificationService {
    * Send a notification for review needed
    */
   notifyReviewNeeded(taskTitle: string, projectId: string, taskId: string): void {
-    this.sendNotification('review-needed', {
-      title: 'Review Needed',
-      body: `"${taskTitle}" is ready for your review`,
-      projectId,
-      taskId
+    // Wrap in setImmediate to prevent blocking if projectStore.getProjects() is slow
+    setImmediate(() => {
+      try {
+        this.sendNotification('review-needed', {
+          title: 'Review Needed',
+          body: `"${taskTitle}" is ready for your review`,
+          projectId,
+          taskId
+        });
+      } catch (error) {
+        console.error('[NotificationService] Error sending review notification:', error);
+      }
     });
   }
 
@@ -82,12 +103,16 @@ class NotificationService {
 
       // Focus window when notification is clicked
       notification.on('click', () => {
-        const window = this.mainWindow?.();
-        if (window) {
-          if (window.isMinimized()) {
-            window.restore();
+        try {
+          const window = this.mainWindow?.();
+          if (window && !window.isDestroyed()) {
+            if (window.isMinimized()) {
+              window.restore();
+            }
+            window.focus();
           }
-          window.focus();
+        } catch (error) {
+          console.error('[NotificationService] Error handling notification click:', error);
         }
       });
 
@@ -119,10 +144,15 @@ class NotificationService {
   } {
     // Try to get project-specific settings
     if (projectId) {
-      const projects = projectStore.getProjects();
-      const project = projects.find(p => p.id === projectId);
-      if (project?.settings?.notifications) {
-        return project.settings.notifications;
+      try {
+        const projects = projectStore.getProjects();
+        const project = projects.find(p => p.id === projectId);
+        if (project?.settings?.notifications) {
+          return project.settings.notifications;
+        }
+      } catch (error) {
+        console.error('[NotificationService] Error getting project settings:', error);
+        // Fall through to defaults
       }
     }
 

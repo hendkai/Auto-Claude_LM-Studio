@@ -86,170 +86,198 @@ export function registerTaskExecutionHandlers(
     IPC_CHANNELS.TASK_START,
     (_, taskId: string, _options?: TaskStartOptions) => {
       console.warn('[TASK_START] Received request for taskId:', taskId);
-      const mainWindow = getMainWindow();
-      if (!mainWindow) {
-        console.warn('[TASK_START] No main window found');
-        return;
-      }
-
-      // Find task and project
-      const { task, project } = findTaskAndProject(taskId);
-
-      if (!task || !project) {
-        console.warn('[TASK_START] Task or project not found for taskId:', taskId);
-        mainWindow.webContents.send(
-          IPC_CHANNELS.TASK_ERROR,
-          taskId,
-          'Task or project not found'
-        );
-        return;
-      }
-
-      // Check git status - Auto Claude requires git for worktree-based builds
-      const gitStatus = checkGitStatus(project.path);
-      if (!gitStatus.isGitRepo) {
-        console.warn('[TASK_START] Project is not a git repository:', project.path);
-        mainWindow.webContents.send(
-          IPC_CHANNELS.TASK_ERROR,
-          taskId,
-          'Git repository required. Please run "git init" in your project directory. Auto Claude uses git worktrees for isolated builds.'
-        );
-        return;
-      }
-      if (!gitStatus.hasCommits) {
-        console.warn('[TASK_START] Git repository has no commits:', project.path);
-        mainWindow.webContents.send(
-          IPC_CHANNELS.TASK_ERROR,
-          taskId,
-          'Git repository has no commits. Please make an initial commit first (git add . && git commit -m "Initial commit").'
-        );
-        return;
-      }
-
-      // Check authentication - Claude requires valid auth to run tasks
-      const profileManager = getClaudeProfileManager();
-      if (!profileManager.hasValidAuth()) {
-        console.warn('[TASK_START] No valid authentication for active profile');
-        mainWindow.webContents.send(
-          IPC_CHANNELS.TASK_ERROR,
-          taskId,
-          'Claude authentication required. Please go to Settings > Claude Profiles and authenticate your account, or set an OAuth token.'
-        );
-        return;
-      }
-
-      console.warn('[TASK_START] Found task:', task.specId, 'status:', task.status, 'subtasks:', task.subtasks.length);
-
-      // Start file watcher for this task
-      const specsBaseDir = getSpecsDir(project.autoBuildPath);
-      const specDir = path.join(
-        project.path,
-        specsBaseDir,
-        task.specId
-      );
-      fileWatcher.watch(taskId, specDir);
-
-      // Check if spec.md exists (indicates spec creation was already done or in progress)
-      const specFilePath = path.join(specDir, AUTO_BUILD_PATHS.SPEC_FILE);
-      const hasSpec = existsSync(specFilePath);
-
-      // Check if this task needs spec creation first (no spec file = not yet created)
-      // OR if it has a spec but no implementation plan subtasks (spec created, needs planning/building)
-      const needsSpecCreation = !hasSpec;
-      const needsImplementation = hasSpec && task.subtasks.length === 0;
-
-      console.warn('[TASK_START] hasSpec:', hasSpec, 'needsSpecCreation:', needsSpecCreation, 'needsImplementation:', needsImplementation);
-
-      // Get base branch: task-level override takes precedence over project settings
-      const baseBranch = task.metadata?.baseBranch || project.settings?.mainBranch;
-
-      if (needsSpecCreation) {
-        // No spec file - need to run spec_runner.py to create the spec
-        const taskDescription = task.description || task.title;
-        console.warn('[TASK_START] Starting spec creation for:', task.specId, 'in:', specDir, 'baseBranch:', baseBranch);
-
-        // Start spec creation process - pass the existing spec directory
-        // so spec_runner uses it instead of creating a new one
-        // Also pass baseBranch so worktrees are created from the correct branch
-        agentManager.startSpecCreation(task.specId, project.path, taskDescription, specDir, task.metadata, baseBranch);
-      } else if (needsImplementation) {
-        // Spec exists but no subtasks - run run.py to create implementation plan and execute
-        // Read the spec.md to get the task description
-        const _taskDescription = task.description || task.title;
-        try {
-          readFileSync(specFilePath, 'utf-8');
-        } catch {
-          // Use default description
+      // Wrap in setImmediate to prevent blocking the event loop
+      // This allows the IPC handler to return immediately
+      setImmediate(async () => {
+        const mainWindow = getMainWindow();
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          console.warn('[TASK_START] No main window found');
+          return;
         }
 
-        console.warn('[TASK_START] Starting task execution (no subtasks) for:', task.specId);
-        // Start task execution which will create the implementation plan
-        // Note: No parallel mode for planning phase - parallel only makes sense with multiple subtasks
-        agentManager.startTaskExecution(
-          taskId,
-          project.path,
-          task.specId,
-          {
-            parallel: false,  // Sequential for planning phase
-            workers: 1,
-            baseBranch
-          }
-        );
-      } else {
-        // Task has subtasks, start normal execution
-        // Note: Parallel execution is handled internally by the agent, not via CLI flags
-        console.warn('[TASK_START] Starting task execution (has subtasks) for:', task.specId);
-
-        agentManager.startTaskExecution(
-          taskId,
-          project.path,
-          task.specId,
-          {
-            parallel: false,
-            workers: 1,
-            baseBranch
-          }
-        );
-      }
-
-      // Notify status change IMMEDIATELY (don't wait for file write)
-      // This provides instant UI feedback while file persistence happens in background
-      const ipcSentAt = Date.now();
-      mainWindow.webContents.send(
-        IPC_CHANNELS.TASK_STATUS_CHANGE,
-        taskId,
-        'in_progress'
-      );
-
-      const DEBUG = process.env.DEBUG === 'true';
-      if (DEBUG) {
-        console.log(`[TASK_START] IPC sent immediately for task ${taskId}, deferring file persistence`);
-      }
-
-      // CRITICAL: Persist status to implementation_plan.json to prevent status flip-flop
-      // When getTasks() is called (on refresh), it reads status from the plan file.
-      // Without persisting here, the old status (e.g., 'human_review') would override
-      // the in-memory 'in_progress' status, causing the task to flip back and forth.
-      // Uses shared utility for consistency with agent-events-handlers.ts
-      // NOTE: This is now async and non-blocking for better UI responsiveness
-      const planPath = path.join(specDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN);
-      setImmediate(async () => {
-        const persistStart = Date.now();
         try {
-          const persisted = await persistPlanStatus(planPath, 'in_progress');
-          if (persisted) {
-            console.warn('[TASK_START] Updated plan status to: in_progress');
+          // Find task and project
+          const { task, project } = findTaskAndProject(taskId);
+
+          if (!task || !project) {
+            console.warn('[TASK_START] Task or project not found for taskId:', taskId);
+            if (!mainWindow.isDestroyed()) {
+              mainWindow.webContents.send(
+                IPC_CHANNELS.TASK_ERROR,
+                taskId,
+                'Task or project not found'
+              );
+            }
+            return;
           }
+
+          // Check git status - Auto Claude requires git for worktree-based builds
+          // This uses execFileSync which can block, but it's now in setImmediate
+          const gitStatus = checkGitStatus(project.path);
+          if (!gitStatus.isGitRepo) {
+            console.warn('[TASK_START] Project is not a git repository:', project.path);
+            if (!mainWindow.isDestroyed()) {
+              mainWindow.webContents.send(
+                IPC_CHANNELS.TASK_ERROR,
+                taskId,
+                'Git repository required. Please run "git init" in your project directory. Auto Claude uses git worktrees for isolated builds.'
+              );
+            }
+            return;
+          }
+          if (!gitStatus.hasCommits) {
+            console.warn('[TASK_START] Git repository has no commits:', project.path);
+            if (!mainWindow.isDestroyed()) {
+              mainWindow.webContents.send(
+                IPC_CHANNELS.TASK_ERROR,
+                taskId,
+                'Git repository has no commits. Please make an initial commit first (git add . && git commit -m "Initial commit").'
+              );
+            }
+            return;
+          }
+
+          // Check authentication - Claude requires valid auth to run tasks
+          const profileManager = getClaudeProfileManager();
+          if (!profileManager.hasValidAuth()) {
+            console.warn('[TASK_START] No valid authentication for active profile');
+            if (!mainWindow.isDestroyed()) {
+              mainWindow.webContents.send(
+                IPC_CHANNELS.TASK_ERROR,
+                taskId,
+                'Claude authentication required. Please go to Settings > Claude Profiles and authenticate your account, or set an OAuth token.'
+              );
+            }
+            return;
+          }
+
+          console.warn('[TASK_START] Found task:', task.specId, 'status:', task.status, 'subtasks:', task.subtasks.length);
+
+          // Start file watcher for this task (async, but fire and forget)
+          const specsBaseDir = getSpecsDir(project.autoBuildPath);
+          const specDir = path.join(
+            project.path,
+            specsBaseDir,
+            task.specId
+          );
+          // Fire and forget - don't block on file watcher setup
+          void fileWatcher.watch(taskId, specDir);
+
+          // Check if spec.md exists (indicates spec creation was already done or in progress)
+          const specFilePath = path.join(specDir, AUTO_BUILD_PATHS.SPEC_FILE);
+          const hasSpec = existsSync(specFilePath);
+
+          // Check if this task needs spec creation first (no spec file = not yet created)
+          // OR if it has a spec but no implementation plan subtasks (spec created, needs planning/building)
+          const needsSpecCreation = !hasSpec;
+          const needsImplementation = hasSpec && task.subtasks.length === 0;
+
+          console.warn('[TASK_START] hasSpec:', hasSpec, 'needsSpecCreation:', needsSpecCreation, 'needsImplementation:', needsImplementation);
+
+          // Get base branch: task-level override takes precedence over project settings
+          const baseBranch = task.metadata?.baseBranch || project.settings?.mainBranch;
+
+          if (needsSpecCreation) {
+            // No spec file - need to run spec_runner.py to create the spec
+            const taskDescription = task.description || task.title;
+            console.warn('[TASK_START] Starting spec creation for:', task.specId, 'in:', specDir, 'baseBranch:', baseBranch);
+
+            // Start spec creation process - pass the existing spec directory
+            // so spec_runner uses it instead of creating a new one
+            // Also pass baseBranch so worktrees are created from the correct branch
+            agentManager.startSpecCreation(task.specId, project.path, taskDescription, specDir, task.metadata, baseBranch);
+          } else if (needsImplementation) {
+            // Spec exists but no subtasks - run run.py to create implementation plan and execute
+            // Read the spec.md to get the task description
+            const _taskDescription = task.description || task.title;
+            try {
+              readFileSync(specFilePath, 'utf-8');
+            } catch {
+              // Use default description
+            }
+
+            console.warn('[TASK_START] Starting task execution (no subtasks) for:', task.specId);
+            // Start task execution which will create the implementation plan
+            // Note: No parallel mode for planning phase - parallel only makes sense with multiple subtasks
+            agentManager.startTaskExecution(
+              taskId,
+              project.path,
+              task.specId,
+              {
+                parallel: false,  // Sequential for planning phase
+                workers: 1,
+                baseBranch
+              }
+            );
+          } else {
+            // Task has subtasks, start normal execution
+            // Note: Parallel execution is handled internally by the agent, not via CLI flags
+            console.warn('[TASK_START] Starting task execution (has subtasks) for:', task.specId);
+
+            agentManager.startTaskExecution(
+              taskId,
+              project.path,
+              task.specId,
+              {
+                parallel: false,
+                workers: 1,
+                baseBranch
+              }
+            );
+          }
+
+          // Notify status change IMMEDIATELY (don't wait for file write)
+          // This provides instant UI feedback while file persistence happens in background
+          const ipcSentAt = Date.now();
+          if (!mainWindow.isDestroyed()) {
+            mainWindow.webContents.send(
+              IPC_CHANNELS.TASK_STATUS_CHANGE,
+              taskId,
+              'in_progress'
+            );
+          }
+
+          const DEBUG = process.env.DEBUG === 'true';
           if (DEBUG) {
-            const delay = persistStart - ipcSentAt;
-            const duration = Date.now() - persistStart;
-            console.log(`[TASK_START] File persistence: delayed ${delay}ms after IPC, completed in ${duration}ms`);
+            console.log(`[TASK_START] IPC sent immediately for task ${taskId}, deferring file persistence`);
           }
-        } catch (err) {
-          console.error('[TASK_START] Failed to persist plan status:', err);
+
+          // CRITICAL: Persist status to implementation_plan.json to prevent status flip-flop
+          // When getTasks() is called (on refresh), it reads status from the plan file.
+          // Without persisting here, the old status (e.g., 'human_review') would override
+          // the in-memory 'in_progress' status, causing the task to flip back and forth.
+          // Uses shared utility for consistency with agent-events-handlers.ts
+          // NOTE: This is now async and non-blocking for better UI responsiveness
+          const planPath = path.join(specDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN);
+          setImmediate(async () => {
+            const persistStart = Date.now();
+            try {
+              const persisted = await persistPlanStatus(planPath, 'in_progress');
+              if (persisted) {
+                console.warn('[TASK_START] Updated plan status to: in_progress');
+              }
+              if (DEBUG) {
+                const delay = persistStart - ipcSentAt;
+                const duration = Date.now() - persistStart;
+                console.log(`[TASK_START] File persistence: delayed ${delay}ms after IPC, completed in ${duration}ms`);
+              }
+            } catch (err) {
+              console.error('[TASK_START] Failed to persist plan status:', err);
+            }
+          });
+          // Note: Plan file may not exist yet for new tasks - that's fine (persistPlanStatus handles ENOENT)
+        } catch (error) {
+          console.error(`[TASK_START] Error starting task ${taskId}:`, error);
+          const mainWindow = getMainWindow();
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send(
+              IPC_CHANNELS.TASK_ERROR,
+              taskId,
+              error instanceof Error ? error.message : 'Failed to start task'
+            );
+          }
         }
       });
-      // Note: Plan file may not exist yet for new tasks - that's fine (persistPlanStatus handles ENOENT)
     }
   );
 
