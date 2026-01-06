@@ -1,3 +1,24 @@
+## 2.7.9 - GUI Commit/Stash and Terminal Error Handling
+
+### ✨ New Features
+
+- **GUI Commit/Stash**: Added Commit and Stash buttons directly in the uncommitted changes warning
+- **Commit Dialog**: New dialog for entering commit messages when committing uncommitted changes
+- **Automatic Refresh**: Merge preview automatically updates after commit/stash operations
+
+### 🐛 Bug Fixes
+
+- Fixed crash when `gnome-terminal` is not available (e.g., on Wayland-only systems)
+- Improved terminal error handling with better fallback mechanisms
+- Fixed crashes when submitting "text changes requested" feedback
+
+### 🛠️ Improvements
+
+- Better terminal detection with support for Wayland terminals (foot, kitty, alacritty, wezterm)
+- Improved error messages and logging for terminal operations
+- Enhanced error handling in task review IPC handlers
+
+---
 ## 2.7.8 - LiteLLM Proxy Status Indicator
 
 ### ✨ New Features
