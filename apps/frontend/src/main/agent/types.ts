@@ -1,5 +1,5 @@
 import { ChildProcess } from 'child_process';
-import type { IdeationConfig } from '../../shared/types';
+import type { IdeationConfig, ProfileModelPair } from '../../shared/types';
 
 /**
  * Agent-specific types for process and state management
@@ -14,6 +14,9 @@ export interface AgentProcess {
   projectPath?: string; // For ideation processes to load session on completion
   spawnId: number; // Unique ID to identify this specific spawn
   queueProcessType?: QueueProcessType; // Type of queue process (ideation or roadmap)
+  // V3: Fallback chain tracking for automatic retry on rate limit
+  fallbackChain?: ProfileModelPair[]; // Array of models to try in order
+  currentFallbackIndex?: number; // Current position in fallback chain (0 = primary)
 }
 
 export interface ExecutionProgressData {

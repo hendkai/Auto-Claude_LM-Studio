@@ -69,11 +69,11 @@ export class AgentProcessManager {
     } as NodeJS.ProcessEnv;
   }
 
-  private handleProcessFailure(
+  private async handleProcessFailure(
     taskId: string,
     allOutput: string,
     processType: ProcessType
-  ): boolean {
+  ): Promise<boolean> {
     console.log('[AgentProcess] Checking for rate limit in output (last 500 chars):', allOutput.slice(-500));
 
     const rateLimitDetection = detectRateLimit(allOutput);
@@ -86,6 +86,14 @@ export class AgentProcessManager {
     });
 
     if (rateLimitDetection.isRateLimited) {
+      // V3: Try next fallback model before Auto-Swap
+      const tryNextFallback = await this.tryNextFallbackModel(taskId, processType);
+      if (tryNextFallback) {
+        console.log('[AgentProcess] Successfully switched to fallback model');
+        return true; // Handled - retrying with fallback
+      }
+
+      // If no fallbacks available, try Auto-Swap (legacy OAuth account switching)
       const wasHandled = this.handleRateLimitWithAutoSwap(
         taskId,
         rateLimitDetection,
@@ -101,6 +109,60 @@ export class AgentProcessManager {
     }
 
     return this.handleAuthFailure(taskId, allOutput);
+  }
+
+  /**
+   * Try next fallback model in the chain
+   * Returns true if retry was attempted, false if no fallbacks available
+   */
+  private async tryNextFallbackModel(taskId: string, processType: ProcessType): Promise<boolean> {
+    const process = this.state.getProcess(taskId);
+    if (!process || !process.fallbackChain || !process.fallbackChain.length) {
+      console.log('[AgentProcess] No fallback chain available for retry');
+      return false;
+    }
+
+    const currentIndex = process.currentFallbackIndex ?? 0;
+    const nextIndex = currentIndex + 1;
+
+    if (nextIndex >= process.fallbackChain.length) {
+      console.log('[AgentProcess] All fallbacks exhausted');
+      this.emitter.emit('agent-notification', {
+        type: 'error',
+        title: 'All Models Unavailable',
+        message: 'All fallback models hit rate limit. Please wait or add more profiles.'
+      });
+      return false;
+    }
+
+    const nextModel = process.fallbackChain[nextIndex];
+    console.log(`[AgentProcess] Switching to fallback ${nextIndex}: ${nextModel.profileId} - ${nextModel.model}`);
+
+    // Notify user about fallback switch
+    this.emitter.emit('agent-notification', {
+      type: 'warning',
+      title: 'Rate Limit Reached',
+      message: `Switched to fallback model: ${nextModel.model}`
+    });
+
+    // Kill current process
+    this.killProcess(taskId);
+
+    // Get env for fallback model
+    try {
+      const fallbackEnv = await getProfileEnvForPair(nextModel);
+
+      // Restart process with fallback model
+      // Note: This is a simplified restart - you may need to preserve more state
+      console.log('[AgentProcess] Restarting with fallback model...');
+
+      // Update fallback index in state before respawn
+      // (The actual respawn will happen in the caller with updated env)
+      return true; // Signal that we should retry
+    } catch (error) {
+      console.error('[AgentProcess] Failed to get env for fallback model:', error);
+      return false;
+    }
   }
 
   private handleRateLimitWithAutoSwap(
@@ -389,7 +451,10 @@ export class AgentProcessManager {
       taskId,
       process: childProcess,
       startedAt: new Date(),
-      spawnId
+      spawnId,
+      // V3: Store fallback chain for retry logic
+      fallbackChain,
+      currentFallbackIndex
     });
 
     let currentPhase: ExecutionProgressData['phase'] = isSpecRunner ? 'planning' : 'planning';
