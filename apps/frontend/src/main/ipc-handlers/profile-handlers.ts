@@ -253,6 +253,28 @@ export function registerProfileHandlers(): void {
           };
         }
 
+        // Auto-start LiteLLM if testing localhost:4000
+        const isLiteLLMUrl = baseUrl.includes('localhost:4000') || baseUrl.includes('127.0.0.1:4000');
+        if (isLiteLLMUrl) {
+          try {
+            console.log(`[Profile] Testing LiteLLM connection, ensuring service is running...`);
+            const litellmService = getLiteLLMService();
+            const status = await litellmService.getStatus();
+            if (!status.isRunning) {
+              console.log('[Profile] Starting LiteLLM for connection test...');
+              await litellmService.start();
+              // Wait a moment for LiteLLM to fully start
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+              console.log('[Profile] LiteLLM started, proceeding with connection test');
+            } else {
+              console.log('[Profile] LiteLLM already running');
+            }
+          } catch (error) {
+            console.warn('[Profile] Failed to start LiteLLM for connection test:', error);
+            // Continue with test anyway - might be running externally
+          }
+        }
+
         // Call testConnection from service layer with abort signal
         const result = await testConnection(baseUrl, apiKey, controller.signal);
 
