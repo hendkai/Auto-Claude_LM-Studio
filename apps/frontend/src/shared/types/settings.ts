@@ -227,6 +227,27 @@ export interface FeatureModelConfigV2 {
   utility: ProfileModelPair;
 }
 
+// Phase model configuration with fallback chain support (V3)
+// Each phase has an array of ProfileModelPairs for automatic fallback
+// [0] = Primary model, [1] = Fallback 1, [2] = Fallback 2, etc.
+export interface PhaseModelConfigV3 {
+  spec: ProfileModelPair[];
+  planning: ProfileModelPair[];
+  coding: ProfileModelPair[];
+  qa: ProfileModelPair[];
+}
+
+// Feature model configuration with fallback chain support (V3)
+// Each feature has an array of ProfileModelPairs for automatic fallback
+export interface FeatureModelConfigV3 {
+  insights: ProfileModelPair[];
+  ideation: ProfileModelPair[];
+  roadmap: ProfileModelPair[];
+  githubIssues: ProfileModelPair[];
+  githubPrs: ProfileModelPair[];
+  utility: ProfileModelPair[];
+}
+
 // Agent profile for preset model/thinking configurations
 // All profiles have per-phase configuration (phaseModels/phaseThinking)
 export interface AgentProfile {
@@ -287,11 +308,15 @@ export interface AppSettings {
   customPhaseThinking?: PhaseThinkingConfig;
   // V2: Multi-profile phase configuration (new format with profileId + model)
   customPhaseModelsV2?: PhaseModelConfigV2;
+  // V3: Phase configuration with fallback chains (array of ProfileModelPair per phase)
+  customPhaseModelsV3?: PhaseModelConfigV3;
   // Feature-specific configuration (insights, ideation, roadmap)
   featureModels?: FeatureModelConfig;
   featureThinking?: FeatureThinkingConfig;
   // V2: Multi-profile feature configuration (new format with profileId + model)
   featureModelsV2?: FeatureModelConfigV2;
+  // V3: Feature configuration with fallback chains (array of ProfileModelPair per feature)
+  featureModelsV3?: FeatureModelConfigV3;
   // Changelog preferences
   changelogFormat?: ChangelogFormat;
   changelogAudience?: ChangelogAudience;
