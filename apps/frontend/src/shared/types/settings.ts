@@ -200,6 +200,33 @@ export interface FeatureThinkingConfig {
   utility: ThinkingLevel;
 }
 
+// Profile + Model combination for cross-profile selection
+// Enables selecting models from different API profiles (e.g., Claude API + LiteLLM)
+export interface ProfileModelPair {
+  profileId: string;  // API profile ID (e.g., "claude-api" or "local-lm-studio")
+  model: string;      // Model name (e.g., "claude-sonnet-4" or "local-model")
+}
+
+// Phase model configuration with full profile support (V2)
+// Allows each phase to use a different API profile + model
+export interface PhaseModelConfigV2 {
+  spec: ProfileModelPair;
+  planning: ProfileModelPair;
+  coding: ProfileModelPair;
+  qa: ProfileModelPair;
+}
+
+// Feature model configuration with profile support (V2)
+// Allows each feature to use a different API profile + model
+export interface FeatureModelConfigV2 {
+  insights: ProfileModelPair;
+  ideation: ProfileModelPair;
+  roadmap: ProfileModelPair;
+  githubIssues: ProfileModelPair;
+  githubPrs: ProfileModelPair;
+  utility: ProfileModelPair;
+}
+
 // Agent profile for preset model/thinking configurations
 // All profiles have per-phase configuration (phaseModels/phaseThinking)
 export interface AgentProfile {
@@ -258,9 +285,13 @@ export interface AppSettings {
   // Custom phase configuration for Auto profile (overrides defaults)
   customPhaseModels?: PhaseModelConfig;
   customPhaseThinking?: PhaseThinkingConfig;
+  // V2: Multi-profile phase configuration (new format with profileId + model)
+  customPhaseModelsV2?: PhaseModelConfigV2;
   // Feature-specific configuration (insights, ideation, roadmap)
   featureModels?: FeatureModelConfig;
   featureThinking?: FeatureThinkingConfig;
+  // V2: Multi-profile feature configuration (new format with profileId + model)
+  featureModelsV2?: FeatureModelConfigV2;
   // Changelog preferences
   changelogFormat?: ChangelogFormat;
   changelogAudience?: ChangelogAudience;

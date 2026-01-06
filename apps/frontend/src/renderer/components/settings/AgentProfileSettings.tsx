@@ -11,6 +11,7 @@ import {
 } from '../../../shared/constants';
 import { useSettingsStore, saveSettings } from '../../stores/settings-store';
 import { ModelSearchableSelect } from './ModelSearchableSelect';
+import { MultiProfileModelSelect } from './MultiProfileModelSelect';
 import { SettingsSection } from './SettingsSection';
 import { Label } from '../ui/label';
 import { Button } from '../ui/button';
@@ -21,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '../ui/select';
-import type { AgentProfile, PhaseModelConfig, PhaseThinkingConfig, ModelTypeShort, ThinkingLevel } from '../../../shared/types/settings';
+import type { AgentProfile, PhaseModelConfig, PhaseThinkingConfig, ModelTypeShort, ThinkingLevel, PhaseModelConfigV2, ProfileModelPair } from '../../../shared/types/settings';
 
 /**
  * Icon mapping for agent profile icons
@@ -60,7 +61,26 @@ export function AgentProfileSettings() {
   const profilePhaseModels = selectedProfile.phaseModels || DEFAULT_PHASE_MODELS;
   const profilePhaseThinking = selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING;
 
-  // Get current phase config from settings (custom) or fall back to profile defaults
+  // Migration: Convert old format to V2 if needed
+  const migrateToV2 = (oldConfig: PhaseModelConfig): PhaseModelConfigV2 => {
+    const modelMap: Record<ModelTypeShort, string> = {
+      'haiku': 'claude-haiku-4',
+      'sonnet': 'claude-sonnet-4',
+      'opus': 'claude-opus-4'
+    };
+    return {
+      spec: { profileId: activeProfileId || '', model: modelMap[oldConfig.spec] },
+      planning: { profileId: activeProfileId || '', model: modelMap[oldConfig.planning] },
+      coding: { profileId: activeProfileId || '', model: modelMap[oldConfig.coding] },
+      qa: { profileId: activeProfileId || '', model: modelMap[oldConfig.qa] }
+    };
+  };
+
+  // Get current phase config V2 (migrate if needed)
+  const currentPhaseModelsV2: PhaseModelConfigV2 = settings.customPhaseModelsV2 ||
+    (settings.customPhaseModels ? migrateToV2(settings.customPhaseModels) : migrateToV2(profilePhaseModels));
+
+  // Legacy: Keep for backward compat
   const currentPhaseModels: PhaseModelConfig = settings.customPhaseModels || profilePhaseModels;
   const currentPhaseThinking: PhaseThinkingConfig = settings.customPhaseThinking || profilePhaseThinking;
 
@@ -99,6 +119,12 @@ export function AgentProfileSettings() {
     // Save as custom config (deviating from preset)
     const newPhaseModels = { ...currentPhaseModels, [phase]: value };
     await saveSettings({ customPhaseModels: newPhaseModels });
+  };
+
+  const handlePhaseModelChangeV2 = async (phase: keyof PhaseModelConfigV2, value: ProfileModelPair) => {
+    // Save as custom config V2 (deviating from preset)
+    const newPhaseModelsV2 = { ...currentPhaseModelsV2, [phase]: value };
+    await saveSettings({ customPhaseModelsV2: newPhaseModelsV2 });
   };
 
   const handlePhaseThinkingChange = async (phase: keyof PhaseThinkingConfig, value: ThinkingLevel) => {
@@ -275,13 +301,10 @@ export function AgentProfileSettings() {
                       {/* Model Select */}
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">{t('agentProfile.model')}</Label>
-                        <ModelSearchableSelect
-                          value={currentPhaseModels[phase]}
-                          onChange={(value) => handlePhaseModelChange(phase, value as ModelTypeShort)}
-                          baseUrl={activeProfile?.baseUrl || ''}
-                          apiKey={activeProfile?.apiKey || ''}
-                          disabled={!activeProfile}
-                          placeholder={activeProfile ? t('settings:modelSelect.placeholder') : "Select an API profile first"}
+                        <MultiProfileModelSelect
+                          value={currentPhaseModelsV2[phase]}
+                          onChange={(value) => handlePhaseModelChangeV2(phase, value)}
+                          placeholder={t('settings:modelSelect.placeholder')}
                         />
                       </div>
                       {/* Thinking Level Select */}
