@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Play, Square, Clock, Zap, Target, Shield, Gauge, Palette, FileCode, Bug, Wrench, Loader2, AlertTriangle, RotateCcw, Archive } from 'lucide-react';
+import { Play, Square, Clock, Zap, Target, Shield, Gauge, Palette, FileCode, Bug, Wrench, Loader2, AlertTriangle, RotateCcw, Archive, Bot } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -16,7 +16,10 @@ import {
   TASK_PRIORITY_COLORS,
   TASK_PRIORITY_LABELS,
   EXECUTION_PHASE_LABELS,
-  EXECUTION_PHASE_BADGE_COLORS
+  EXECUTION_PHASE_BADGE_COLORS,
+  MODEL_LABELS,
+  MODEL_COLORS,
+  DEFAULT_AGENT_PROFILES
 } from '../../shared/constants';
 import { startTask, stopTask, checkTaskRunning, recoverStuckTask, isIncompleteHumanReview, archiveTasks } from '../stores/task-store';
 import type { Task, TaskCategory, ReviewReason } from '../../shared/types';
@@ -63,6 +66,8 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.metadata?.category === nextTask.metadata?.category &&
     prevTask.metadata?.complexity === nextTask.metadata?.complexity &&
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
+    prevTask.metadata?.model === nextTask.metadata?.model &&
+    prevTask.metadata?.isAutoProfile === nextTask.metadata?.isAutoProfile &&
     // Check if any subtask statuses changed (compare all subtasks)
     prevTask.subtasks.every((s, i) => s.status === nextTask.subtasks[i]?.status)
   );
@@ -330,6 +335,22 @@ export const TaskCard = memo(function TaskCard({ task, onClick }: TaskCardProps)
                 {EXECUTION_PHASE_LABELS[executionPhase]}
               </Badge>
             )}
+            {/* AI Model badge - shows configured model or default from auto profile */}
+            {(() => {
+              const model = task.metadata?.model || DEFAULT_AGENT_PROFILES[0]?.model || 'opus';
+              return MODEL_LABELS[model] ? (
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'text-[10px] px-1.5 py-0.5 flex items-center gap-1',
+                    MODEL_COLORS[model]
+                  )}
+                >
+                  <Bot className="h-2.5 w-2.5" />
+                  {MODEL_LABELS[model]}
+                </Badge>
+              ) : null;
+            })()}
             {/* Status badge - hide when execution phase badge is showing */}
             {!hasActiveExecution && (
               <Badge

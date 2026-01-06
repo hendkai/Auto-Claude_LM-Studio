@@ -208,3 +208,19 @@ export const ALLOWED_IMAGE_TYPES_DISPLAY = 'PNG, JPEG, GIF, WebP, SVG';
 
 // Attachments directory name within spec folder
 export const ATTACHMENTS_DIR = 'attachments';
+
+// ============================================
+// AI Model Labels and Colors
+// ============================================
+
+export const MODEL_LABELS: Record<string, string> = {
+  opus: 'Opus',
+  sonnet: 'Sonnet',
+  haiku: 'Haiku'
+};
+
+export const MODEL_COLORS: Record<string, string> = {
+  opus: 'bg-violet-500/10 text-violet-400 border-violet-500/30',
+  sonnet: 'bg-blue-500/10 text-blue-400 border-blue-500/30',
+  haiku: 'bg-teal-500/10 text-teal-400 border-teal-500/30'
+};
