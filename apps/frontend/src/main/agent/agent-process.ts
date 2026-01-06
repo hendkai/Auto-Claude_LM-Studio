@@ -583,7 +583,7 @@ export class AgentProcessManager {
 
       if (code !== 0) {
         console.log('[AgentProcess] Process failed with code:', code, 'for task:', taskId);
-        const wasHandled = this.handleProcessFailure(taskId, allOutput, processType);
+        const wasHandled = await this.handleProcessFailure(taskId, allOutput, processType);
         if (wasHandled) {
           this.emitter.emit('exit', taskId, code, processType);
           return;
