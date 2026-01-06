@@ -169,18 +169,36 @@ export function registerProfileHandlers(): void {
         });
 
         // Auto-start LiteLLM if profile uses localhost:4000
-        if (activeProfileBaseUrl && activeProfileBaseUrl.includes('localhost:4000')) {
+        // Check both normalized and original URL patterns
+        const isLiteLLMProfile = activeProfileBaseUrl && (
+          activeProfileBaseUrl.includes('localhost:4000') ||
+          activeProfileBaseUrl.includes('127.0.0.1:4000') ||
+          activeProfileBaseUrl === 'http://localhost:4000' ||
+          activeProfileBaseUrl === 'http://127.0.0.1:4000'
+        );
+
+        if (isLiteLLMProfile) {
           try {
+            console.log(`[Profile] Detected LiteLLM profile with baseUrl: ${activeProfileBaseUrl}`);
             const litellmService = getLiteLLMService();
             const status = await litellmService.getStatus();
+            console.log(`[Profile] LiteLLM status:`, status);
             if (!status.isRunning) {
               console.log('[Profile] Auto-starting LiteLLM for localhost:4000 profile');
               await litellmService.start();
+              console.log('[Profile] LiteLLM started successfully');
+            } else {
+              console.log('[Profile] LiteLLM already running');
             }
           } catch (error) {
-            // Don't fail profile activation if LiteLLM start fails
-            console.warn('[Profile] Failed to auto-start LiteLLM:', error);
+            // Don't fail profile activation if LiteLLM start fails, but log the error
+            console.error('[Profile] Failed to auto-start LiteLLM:', error);
+            if (error instanceof Error) {
+              console.error('[Profile] Error details:', error.message, error.stack);
+            }
           }
+        } else {
+          console.log(`[Profile] Not a LiteLLM profile (baseUrl: ${activeProfileBaseUrl})`);
         }
 
         return { success: true };

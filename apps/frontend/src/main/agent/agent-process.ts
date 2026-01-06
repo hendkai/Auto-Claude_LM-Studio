@@ -511,7 +511,7 @@ export class AgentProcessManager {
     });
 
     let currentPhase: ExecutionProgressData['phase'] = isSpecRunner ? 'planning' : 'planning';
-    
+
     this.state.addProcess(taskId, {
       taskId,
       process: childProcess,
@@ -710,10 +710,10 @@ export class AgentProcessManager {
             }
           }
           // Fall back to standard failure handling if no rate limit or fallback failed
-          const wasHandled = await this.handleProcessFailure(taskId, allOutput, processType);
-          if (wasHandled) {
-            this.emitter.emit('exit', taskId, code, processType);
-            return;
+        const wasHandled = await this.handleProcessFailure(taskId, allOutput, processType);
+        if (wasHandled) {
+          this.emitter.emit('exit', taskId, code, processType);
+          return;
           }
         } else {
           console.log('[AgentProcess] Rate limit already handled during execution, skipping exit handler');

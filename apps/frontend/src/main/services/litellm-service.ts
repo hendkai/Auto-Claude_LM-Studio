@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { app } from 'electron';
 import { findPythonCommand, parsePythonCommand } from '../python-detector';
+import { pythonEnvManager } from '../python-env-manager';
 
 export interface LiteLLMStatus {
   isRunning: boolean;
@@ -162,14 +163,50 @@ litellm_settings:
     if (!configPath) {
       configPath = this.createDefaultConfig();
     }
+    console.log(`[LiteLLM] Using config: ${configPath}`);
 
-    // Get Python path
-    const pythonPath = findPythonCommand();
+    // Get Python path - prefer venv if ready (has dependencies), otherwise bundled/system Python
+    let pythonPath: string;
+    if (pythonEnvManager.isEnvReady()) {
+      const venvPath = pythonEnvManager.getPythonPath();
+      if (venvPath) {
+        pythonPath = venvPath;
+        console.log(`[LiteLLM] Using venv Python: ${pythonPath}`);
+      } else {
+        pythonPath = findPythonCommand() || 'python';
+        console.log(`[LiteLLM] Using fallback Python: ${pythonPath}`);
+      }
+    } else {
+      pythonPath = findPythonCommand() || 'python';
+      console.log(`[LiteLLM] Using system/bundled Python: ${pythonPath}`);
+    }
+
     if (!pythonPath) {
       throw new Error('Python not found. Cannot start LiteLLM.');
     }
 
     const [pythonCommand, pythonBaseArgs] = parsePythonCommand(pythonPath);
+
+    // Get Python environment with PYTHONPATH for bundled packages
+    const pythonEnv = pythonEnvManager.getPythonEnv();
+    console.log(`[LiteLLM] Python environment PYTHONPATH: ${pythonEnv.PYTHONPATH || 'not set'}`);
+
+    // Check if litellm is installed
+    try {
+      const { execSync } = require('child_process');
+      const checkCmd = [...pythonBaseArgs, '-m', 'litellm', '--version'];
+      console.log(`[LiteLLM] Checking if litellm is installed: ${pythonCommand} ${checkCmd.join(' ')}`);
+      const result = execSync(`${pythonCommand} ${checkCmd.join(' ')}`, {
+        stdio: 'pipe',
+        timeout: 5000,
+        encoding: 'utf-8',
+      });
+      console.log(`[LiteLLM] Verified litellm is installed: ${result.trim()}`);
+    } catch (error) {
+      console.error('[LiteLLM] Failed to verify litellm installation:', error);
+      // Don't throw immediately - try to start anyway, might work
+      console.warn('[LiteLLM] Warning: litellm might not be installed, but attempting to start anyway');
+    }
 
     // Start LiteLLM
     console.log(`[LiteLLM] Starting with config: ${configPath}`);
@@ -184,7 +221,7 @@ litellm_settings:
     ], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
-        ...process.env,
+        ...pythonEnv, // Includes PYTHONPATH for bundled site-packages
         PYTHONUNBUFFERED: '1',
         PYTHONUTF8: '1',
       },
