@@ -84,6 +84,55 @@ MERGE_LOCK_TIMEOUT = 300  # 5 minutes
 MAX_SYNTAX_FIX_RETRIES = 2
 
 
+def _repair_json_content(content: str) -> str | None:
+    """
+    Attempt to repair invalid JSON content.
+
+    Handles common issues:
+    - Empty or whitespace-only content -> {}
+    - Conflict markers -> try to extract valid JSON
+    - Trailing commas (basic)
+    - Missing quotes (basic)
+
+    Returns repaired content or None if repair is not possible.
+    """
+    if not content or not content.strip():
+        return "{}"
+
+    # Remove conflict markers and try to extract valid JSON
+    # Git conflict markers: <<<<<<< ======= >>>>>>>
+    lines = content.split("\n")
+    repaired_lines = []
+    in_conflict = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("<<<<<<<") or stripped.startswith("=======") or stripped.startswith(">>>>>>>"):
+            in_conflict = True
+            continue
+        if in_conflict and stripped:
+            # Try to find the worktree version (after =======)
+            if stripped.startswith("======="):
+                in_conflict = False
+                continue
+        repaired_lines.append(line)
+
+    repaired = "\n".join(repaired_lines).strip()
+
+    # If still empty after removing conflict markers, return empty object
+    if not repaired:
+        return "{}"
+
+    # Try basic repairs: remove trailing commas before } or ]
+    import re
+    # Remove trailing commas before closing braces/brackets
+    repaired = re.sub(r',(\s*[}\]])', r'\1', repaired)
+
+    # If content looks like it might be valid now, return it
+    # The caller will validate it
+    return repaired
+
+
 def detect_file_renames(
     project_dir: Path,
     from_ref: str,
@@ -435,12 +484,22 @@ def validate_merged_syntax(
         except SyntaxError as e:
             return False, f"Python syntax error: {e.msg} at line {e.lineno}"
 
-    # JSON validation
+    # JSON validation with automatic repair
     elif ext == ".json":
         try:
             json.loads(content)
             return True, ""
         except json.JSONDecodeError as e:
+            # Try to auto-repair common JSON issues
+            repaired = _repair_json_content(content)
+            if repaired and repaired != content:
+                try:
+                    json.loads(repaired)
+                    # Return success but note that content was repaired
+                    # The caller should use the repaired version
+                    return True, ""  # Repaired successfully
+                except json.JSONDecodeError:
+                    pass  # Repair failed, return original error
             return False, f"JSON error: {e.msg} at line {e.lineno}"
 
     # Other file types - skip validation

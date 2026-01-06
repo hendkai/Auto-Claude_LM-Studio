@@ -1471,16 +1471,57 @@ async def _merge_file_with_ai_async(
                     task.file_path, merged_content, task.project_dir
                 )
                 if not is_valid:
-                    debug_warning(
-                        MODULE,
-                        f"AI merge produced invalid syntax for {task.file_path}: {syntax_error}",
-                    )
-                    return ParallelMergeResult(
-                        file_path=task.file_path,
-                        merged_content=None,
-                        success=False,
-                        error=f"AI merge produced invalid syntax: {syntax_error}",
-                    )
+                    # Try to auto-repair JSON files
+                    from pathlib import Path as P
+                    if P(task.file_path).suffix.lower() == ".json":
+                        # Import repair function from git_utils
+                        from core.workspace.git_utils import _repair_json_content
+                        repaired = _repair_json_content(merged_content)
+                        if repaired and repaired != merged_content:
+                            # Validate the repaired version
+                            is_valid_repaired, _ = _validate_merged_syntax(
+                                task.file_path, repaired, task.project_dir
+                            )
+                            if is_valid_repaired:
+                                debug(
+                                    MODULE,
+                                    f"Auto-repaired invalid JSON for {task.file_path}",
+                                )
+                                merged_content = repaired
+                                is_valid = True
+                    
+                    if not is_valid:
+                        # If repair failed or not JSON, try using worktree version as fallback
+                        # This is safe for Auto-Claude internal files like .claude_settings.json
+                        internal_files = [".claude_settings.json", ".auto-claude-security.json"]
+                        if any(task.file_path.endswith(f) for f in internal_files):
+                            debug(
+                                MODULE,
+                                f"Using worktree version for Auto-Claude internal file: {task.file_path}",
+                            )
+                            # Validate worktree content
+                            is_valid_worktree, _ = _validate_merged_syntax(
+                                task.file_path, task.worktree_content, task.project_dir
+                            )
+                            if is_valid_worktree:
+                                merged_content = task.worktree_content
+                                is_valid = True
+                                debug(
+                                    MODULE,
+                                    f"Using worktree version for {task.file_path} (valid JSON)",
+                                )
+                        
+                        if not is_valid:
+                            debug_warning(
+                                MODULE,
+                                f"AI merge produced invalid syntax for {task.file_path}: {syntax_error}",
+                            )
+                            return ParallelMergeResult(
+                                file_path=task.file_path,
+                                merged_content=None,
+                                success=False,
+                                error=f"AI merge produced invalid syntax: {syntax_error}",
+                            )
 
                 debug(MODULE, f"AI merged {task.file_path} successfully")
                 return ParallelMergeResult(
