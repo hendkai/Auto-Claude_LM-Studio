@@ -29,6 +29,11 @@ export {
   discoverModels
 } from './profile-service';
 
+// Profile Environment Utils
+export {
+  getProfileEnvForPair
+} from './profile-env-utils';
+
 export type { CreateProfileInput, UpdateProfileInput } from './profile-service';
 
 // Re-export types from shared for convenience
