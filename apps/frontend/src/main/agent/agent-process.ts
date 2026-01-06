@@ -564,7 +564,7 @@ export class AgentProcessManager {
       stderrBuffer = processBufferedOutput(stderrBuffer, data.toString('utf8'));
     });
 
-    childProcess.on('exit', (code: number | null) => {
+    childProcess.on('exit', async (code: number | null) => {
       if (stdoutBuffer.trim()) {
         this.emitter.emit('log', taskId, stdoutBuffer + '\n');
         processLog(stdoutBuffer);
