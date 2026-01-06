@@ -1,3 +1,19 @@
+## 2.7.8 - LiteLLM Proxy Status Indicator
+
+### ✨ New Features
+
+- **LiteLLM Status Indicator**: Added visual status lamp (green/red) in Settings showing if LiteLLM proxy is running
+- **Manual Control**: Start/Stop buttons for LiteLLM proxy service in Settings
+- **Auto-Refresh**: Status updates automatically every 2 seconds
+- **Smart Display**: Status indicator only appears when a profile with `localhost:4000` exists
+
+### 🛠️ Improvements
+
+- Better visibility of LiteLLM proxy status for troubleshooting
+- Manual control allows users to start/stop proxy independently of profile activation
+
+---
+
 ## 2.7.7 - LiteLLM Startup Reliability Improvements
 
 ### 🐛 Bug Fixes
