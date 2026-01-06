@@ -53,6 +53,17 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
   }
 
   // Compare only the fields that affect rendering
+  const prevPhaseModels = prevTask.metadata?.phaseModels;
+  const nextPhaseModels = nextTask.metadata?.phaseModels;
+  const phaseModelsEqual = 
+    prevPhaseModels === nextPhaseModels ||
+    (prevPhaseModels && nextPhaseModels &&
+     prevPhaseModels.spec === nextPhaseModels.spec &&
+     prevPhaseModels.planning === nextPhaseModels.planning &&
+     prevPhaseModels.coding === nextPhaseModels.coding &&
+     prevPhaseModels.qa === nextPhaseModels.qa) ||
+    (!prevPhaseModels && !nextPhaseModels);
+
   const isEqual = (
     prevTask.id === nextTask.id &&
     prevTask.status === nextTask.status &&
@@ -68,6 +79,7 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
     prevTask.metadata?.model === nextTask.metadata?.model &&
     prevTask.metadata?.isAutoProfile === nextTask.metadata?.isAutoProfile &&
+    phaseModelsEqual &&
     // Check if any subtask statuses changed (compare all subtasks)
     prevTask.subtasks.every((s, i) => s.status === nextTask.subtasks[i]?.status)
   );
@@ -335,19 +347,49 @@ export const TaskCard = memo(function TaskCard({ task, onClick }: TaskCardProps)
                 {EXECUTION_PHASE_LABELS[executionPhase]}
               </Badge>
             )}
-            {/* AI Model badge - shows configured model or default from auto profile */}
+            {/* AI Model badge - shows currently active model (may differ from configured if fallback was used) */}
             {(() => {
-              const model = task.metadata?.model || DEFAULT_AGENT_PROFILES[0]?.model || 'opus';
-              return MODEL_LABELS[model] ? (
+              // Priority: 1. Currently active model from execution progress (reflects fallback switches)
+              //           2. Configured model from metadata
+              //           3. Default model
+              let model: string | undefined;
+              
+              // Use current model from execution progress if available (reflects actual running model)
+              if (task.executionProgress?.currentModel) {
+                model = task.executionProgress.currentModel;
+              } else if (task.metadata?.phaseModels) {
+                // Extract first model from phaseModels (prioritize spec phase)
+                model = task.metadata.phaseModels.spec || 
+                        task.metadata.phaseModels.planning || 
+                        task.metadata.phaseModels.coding || 
+                        task.metadata.phaseModels.qa;
+              }
+              // Fall back to single model or default
+              model = model || task.metadata?.model || DEFAULT_AGENT_PROFILES[0]?.model || 'opus';
+              
+              // Map model name to shorthand if needed (e.g., "glm-4.7" -> "glm")
+              // Check if it's a known model shorthand first
+              if (!MODEL_LABELS[model]) {
+                // Try to extract model name from full model ID (e.g., "claude-opus-4" -> "opus")
+                if (model.includes('opus')) model = 'opus';
+                else if (model.includes('sonnet')) model = 'sonnet';
+                else if (model.includes('haiku')) model = 'haiku';
+                else if (model.includes('glm')) model = 'glm';
+                // If still not found, try to use the model name as-is (for custom models)
+              }
+              
+              // Show badge if we have a label or if it's a custom model name
+              const modelLabel = MODEL_LABELS[model] || model;
+              return modelLabel ? (
                 <Badge
                   variant="outline"
                   className={cn(
                     'text-[10px] px-1.5 py-0.5 flex items-center gap-1',
-                    MODEL_COLORS[model]
+                    MODEL_COLORS[model] || 'bg-gray-500/10 text-gray-400 border-gray-500/30'
                   )}
                 >
                   <Bot className="h-2.5 w-2.5" />
-                  {MODEL_LABELS[model]}
+                  {modelLabel}
                 </Badge>
               ) : null;
             })()}

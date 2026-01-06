@@ -142,25 +142,64 @@ export class AgentProcessManager {
     this.emitter.emit('agent-notification', {
       type: 'warning',
       title: 'Rate Limit Reached',
-      message: `Switched to fallback model: ${nextModel.model}`
+      message: `Switching to fallback model: ${nextModel.model}`
     });
 
-    // Kill current process
+    // Get spawn arguments for restart (before killing process)
+    const spawnArgs = process.spawnArgs;
+    if (!spawnArgs) {
+      console.error('[AgentProcess] No spawn arguments stored, cannot restart with fallback');
+      return false;
+    }
+
+    // Store next index and fallback chain before killing process
+    const nextFallbackIndex = nextIndex;
+    const savedFallbackChain = process.fallbackChain;
+
+    // Kill current process (only once)
     this.killProcess(taskId);
 
     // Get env for fallback model
     try {
       const fallbackEnv = await getProfileEnvForPair(nextModel);
 
-      // Restart process with fallback model
-      // Note: This is a simplified restart - you may need to preserve more state
-      console.log('[AgentProcess] Restarting with fallback model...');
+      // Temporarily store the fallback index so spawnProcess can use it
+      // Create a temporary process entry with the next index
+      // Preserve current phase to use correct fallback chain
+      const tempProcess: AgentProcess = {
+        taskId,
+        process: null as any, // Will be replaced by spawnProcess
+        startedAt: new Date(),
+        spawnId: 0, // Will be replaced by spawnProcess
+        fallbackChain: savedFallbackChain,
+        currentFallbackIndex: nextFallbackIndex,
+        currentPhase: process.currentPhase, // Preserve current phase
+        spawnArgs
+      };
+      this.state.addProcess(taskId, tempProcess);
 
-      // Update fallback index in state before respawn
-      // (The actual respawn will happen in the caller with updated env)
-      return true; // Signal that we should retry
+      // Emit execution progress update with new model
+      this.emitter.emit('execution-progress', taskId, {
+        phase: 'planning', // Keep current phase
+        phaseProgress: 0,
+        overallProgress: 0,
+        currentModel: nextModel.model, // Update current model
+        message: `Switched to fallback model: ${nextModel.model}`
+      });
+
+      // Restart process with fallback model
+      console.log('[AgentProcess] Restarting with fallback model...');
+      await this.spawnProcess(
+        taskId,
+        spawnArgs.cwd,
+        spawnArgs.args,
+        { ...spawnArgs.extraEnv, ...fallbackEnv },
+        spawnArgs.processType
+      );
+
+      return true; // Successfully restarted with fallback
     } catch (error) {
-      console.error('[AgentProcess] Failed to get env for fallback model:', error);
+      console.error('[AgentProcess] Failed to restart with fallback model:', error);
       return false;
     }
   }
@@ -405,7 +444,9 @@ export class AgentProcessManager {
     // V3: Use fallback chain (array of ProfileModelPair per phase)
     let apiProfileEnv: Record<string, string> = {};
     let fallbackChain: ProfileModelPair[] = [];
-    let currentFallbackIndex = 0; // Start with primary model
+    // Check if we're restarting with a fallback model (preserve currentFallbackIndex)
+    const existingProcess = this.state.getProcess(taskId);
+    let currentFallbackIndex = existingProcess?.currentFallbackIndex ?? 0;
 
     try {
       // Load settings to check for phase-specific configuration
@@ -413,23 +454,45 @@ export class AgentProcessManager {
       const phaseModelsV3 = settings?.customPhaseModelsV3 as import('../../shared/types/settings').PhaseModelConfigV3 | undefined;
 
       // Determine initial phase (spec-runner starts in spec, others in planning)
-      const initialPhase: 'spec' | 'planning' | 'coding' | 'qa' = isSpecRunner ? 'spec' : 'planning';
+      // Use current phase from existing process if available, otherwise default
+      let initialPhase: 'spec' | 'planning' | 'coding' | 'qa' = isSpecRunner ? 'spec' : 'planning';
+      
+      // Map execution phase to config phase
+      if (existingProcess?.currentPhase) {
+        const phaseMap: Record<string, 'spec' | 'planning' | 'coding' | 'qa'> = {
+          'planning': 'planning',
+          'coding': 'coding',
+          'qa_review': 'qa',
+          'qa_fixing': 'qa'
+        };
+        const mappedPhase = phaseMap[existingProcess.currentPhase];
+        if (mappedPhase) {
+          initialPhase = mappedPhase;
+          console.log(`[AgentProcess] Using phase from existing process: ${existingProcess.currentPhase} -> ${initialPhase}`);
+        }
+      }
 
-      // If V3 config exists, use fallback chain
+      // If V3 config exists, use fallback chain for the current phase
       if (phaseModelsV3 && phaseModelsV3[initialPhase] && phaseModelsV3[initialPhase].length > 0) {
         fallbackChain = phaseModelsV3[initialPhase];
-        const primaryModel = fallbackChain[0];
-        console.log(`[AgentProcess] Using phase-specific profile for ${initialPhase}:`, primaryModel);
+        // Use the model at currentFallbackIndex (or primary if not set)
+        const modelIndex = currentFallbackIndex < fallbackChain.length ? currentFallbackIndex : 0;
+        const selectedModel = fallbackChain[modelIndex];
+        console.log(`[AgentProcess] Using phase-specific profile for ${initialPhase} (index ${modelIndex}):`, selectedModel);
         console.log(`[AgentProcess] Fallback chain length: ${fallbackChain.length}`);
-        apiProfileEnv = await getProfileEnvForPair(primaryModel);
+        apiProfileEnv = await getProfileEnvForPair(selectedModel);
+        // Ensure currentFallbackIndex is set correctly
+        currentFallbackIndex = modelIndex;
       } else {
         // Fallback to active profile
         console.log('[AgentProcess] No V3 phase config, using active profile');
         apiProfileEnv = await getAPIProfileEnv();
+        currentFallbackIndex = 0;
       }
     } catch (error) {
       console.error('[Agent Process] Failed to get API profile env:', error);
       // Continue with empty profile env (falls back to OAuth mode)
+      currentFallbackIndex = 0;
     }
 
     // Get OAuth mode clearing vars (clears stale ANTHROPIC_* vars when in OAuth mode)
@@ -447,6 +510,8 @@ export class AgentProcessManager {
       }
     });
 
+    let currentPhase: ExecutionProgressData['phase'] = isSpecRunner ? 'planning' : 'planning';
+    
     this.state.addProcess(taskId, {
       taskId,
       process: childProcess,
@@ -454,10 +519,18 @@ export class AgentProcessManager {
       spawnId,
       // V3: Store fallback chain for retry logic
       fallbackChain,
-      currentFallbackIndex
+      currentFallbackIndex,
+      currentPhase, // Store initial phase
+      // Store spawn arguments for restarting with fallback model
+      spawnArgs: {
+        cwd,
+        args,
+        extraEnv,
+        processType
+      }
     });
 
-    let currentPhase: ExecutionProgressData['phase'] = isSpecRunner ? 'planning' : 'planning';
+    // currentPhase is already declared above
     let phaseProgress = 0;
     let currentSubtask: string | undefined;
     let lastMessage: string | undefined;
@@ -465,6 +538,7 @@ export class AgentProcessManager {
     let stdoutBuffer = '';
     let stderrBuffer = '';
     let sequenceNumber = 0;
+    let rateLimitHandled = false; // Track if we've already handled a rate limit for this process
 
     this.emitter.emit('execution-progress', taskId, {
       phase: currentPhase,
@@ -518,13 +592,19 @@ export class AgentProcessManager {
           console.log(`[PhaseDebug:${taskId}] Emitting execution-progress:`, { phase: currentPhase, phaseProgress, overallProgress });
         }
 
+        // Preserve currentModel in progress updates
+        const currentModelName = fallbackChain && fallbackChain.length > 0 && currentFallbackIndex < fallbackChain.length
+          ? fallbackChain[currentFallbackIndex].model
+          : undefined;
+
         this.emitter.emit('execution-progress', taskId, {
           phase: currentPhase,
           phaseProgress,
           overallProgress,
           currentSubtask,
           message: lastMessage,
-          sequenceNumber: ++sequenceNumber
+          sequenceNumber: ++sequenceNumber,
+          currentModel: currentModelName
         });
       }
     };
@@ -547,6 +627,39 @@ export class AgentProcessManager {
         if (line.trim()) {
           this.emitter.emit('log', taskId, line + '\n');
           processLog(line);
+          
+          // Check for rate limit during execution (not just on exit)
+          if (!rateLimitHandled) {
+            const rateLimitDetection = detectRateLimit(line);
+            if (rateLimitDetection.isRateLimited) {
+              console.log('[AgentProcess] Rate limit detected during execution:', rateLimitDetection);
+              console.log('[AgentProcess] Current process state:', {
+                taskId,
+                hasProcess: !!this.state.getProcess(taskId),
+                fallbackChain: this.state.getProcess(taskId)?.fallbackChain,
+                currentIndex: this.state.getProcess(taskId)?.currentFallbackIndex
+              });
+              rateLimitHandled = true;
+              
+              // Try to switch to next fallback model (await to ensure it completes)
+              // Use void to avoid blocking the log processing
+              void (async () => {
+                try {
+                  const switched = await this.tryNextFallbackModel(taskId, processType);
+                  if (switched) {
+                    console.log('[AgentProcess] Successfully switched to fallback model during execution');
+                  } else {
+                    console.log('[AgentProcess] Could not switch to fallback model, will handle on exit');
+                    rateLimitHandled = false; // Allow handling on exit if fallback failed
+                  }
+                } catch (error) {
+                  console.error('[AgentProcess] Error switching to fallback model:', error);
+                  rateLimitHandled = false; // Allow handling on exit if fallback failed
+                }
+              })();
+            }
+          }
+          
           if (isDebug) {
             console.log(`[Agent:${taskId}] ${line}`);
           }
@@ -583,10 +696,27 @@ export class AgentProcessManager {
 
       if (code !== 0) {
         console.log('[AgentProcess] Process failed with code:', code, 'for task:', taskId);
-        const wasHandled = await this.handleProcessFailure(taskId, allOutput, processType);
-        if (wasHandled) {
-          this.emitter.emit('exit', taskId, code, processType);
-          return;
+        // Check for rate limit in final output if not already handled during execution
+        if (!rateLimitHandled) {
+          const rateLimitDetection = detectRateLimit(allOutput);
+          if (rateLimitDetection.isRateLimited) {
+            console.log('[AgentProcess] Rate limit detected on exit, attempting fallback switch');
+            rateLimitHandled = true;
+            const switched = await this.tryNextFallbackModel(taskId, processType);
+            if (switched) {
+              console.log('[AgentProcess] Successfully switched to fallback model on exit');
+              this.emitter.emit('exit', taskId, code, processType);
+              return;
+            }
+          }
+          // Fall back to standard failure handling if no rate limit or fallback failed
+          const wasHandled = await this.handleProcessFailure(taskId, allOutput, processType);
+          if (wasHandled) {
+            this.emitter.emit('exit', taskId, code, processType);
+            return;
+          }
+        } else {
+          console.log('[AgentProcess] Rate limit already handled during execution, skipping exit handler');
         }
       }
 

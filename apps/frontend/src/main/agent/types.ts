@@ -17,6 +17,14 @@ export interface AgentProcess {
   // V3: Fallback chain tracking for automatic retry on rate limit
   fallbackChain?: ProfileModelPair[]; // Array of models to try in order
   currentFallbackIndex?: number; // Current position in fallback chain (0 = primary)
+  currentPhase?: ExecutionProgressData['phase']; // Current execution phase (for determining correct fallback chain)
+  // Store spawn arguments for restarting with fallback model
+  spawnArgs?: {
+    cwd: string;
+    args: string[];
+    extraEnv: Record<string, string>;
+    processType: ProcessType;
+  };
 }
 
 export interface ExecutionProgressData {
@@ -25,6 +33,7 @@ export interface ExecutionProgressData {
   overallProgress: number;
   currentSubtask?: string;
   message?: string;
+  currentModel?: string;  // Currently active model (may differ from configured model if fallback was used)
 }
 
 export type ProcessType = 'spec-creation' | 'task-execution' | 'qa-process';

@@ -8,13 +8,15 @@ import { getClaudeProfileManager } from './claude-profile-manager';
 /**
  * Regex pattern to detect Claude Code rate limit messages
  * Matches: "Limit reached · resets Dec 17 at 6am (Europe/Oslo)"
+ * Also matches: "You're out of extra usage · resets 7pm (Europe/Berlin)"
  */
-const RATE_LIMIT_PATTERN = /Limit reached\s*[·•]\s*resets\s+(.+?)(?:\s*$|\n)/im;
+const RATE_LIMIT_PATTERN = /(?:Limit reached|You're out of extra usage)\s*[·•]\s*resets\s+(.+?)(?:\s*$|\n)/im;
 
 /**
  * Additional patterns that might indicate rate limiting
  */
 const RATE_LIMIT_INDICATORS = [
+  /out\s*of\s*extra\s*usage/i,
   /rate\s*limit/i,
   /usage\s*limit/i,
   /limit\s*reached/i,

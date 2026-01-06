@@ -27,6 +27,7 @@ export interface ExecutionProgress {
   message?: string;  // Current status message
   startedAt?: Date;
   sequenceNumber?: number;  // Monotonically increasing counter to detect stale updates
+  currentModel?: string;  // Currently active model (may differ from configured model if fallback was used)
 }
 
 export interface Subtask {
