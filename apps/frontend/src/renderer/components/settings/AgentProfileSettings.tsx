@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Brain, Scale, Zap, Check, Sparkles, ChevronDown, ChevronUp, RotateCcw, Settings2 } from 'lucide-react';
+import { Brain, Scale, Zap, Check, Sparkles, ChevronDown, ChevronUp, RotateCcw, Settings2, Plus, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
   DEFAULT_AGENT_PROFILES,
@@ -10,10 +10,10 @@ import {
   DEFAULT_PHASE_THINKING
 } from '../../../shared/constants';
 import { useSettingsStore, saveSettings } from '../../stores/settings-store';
-import { ModelSearchableSelect } from './ModelSearchableSelect';
 import { MultiProfileModelSelect } from './MultiProfileModelSelect';
 import { SettingsSection } from './SettingsSection';
 import { Label } from '../ui/label';
+import { getCurrentPhaseConfigV3 } from '../../../shared/utils/phase-config-migration';
 import { Button } from '../ui/button';
 import {
   Select,
@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '../ui/select';
-import type { AgentProfile, PhaseModelConfig, PhaseThinkingConfig, ModelTypeShort, ThinkingLevel, PhaseModelConfigV2, ProfileModelPair } from '../../../shared/types/settings';
+import type { AgentProfile, PhaseModelConfig, PhaseThinkingConfig, ModelTypeShort, ThinkingLevel, PhaseModelConfigV2, PhaseModelConfigV3, ProfileModelPair } from '../../../shared/types/settings';
 
 /**
  * Icon mapping for agent profile icons
@@ -61,24 +61,12 @@ export function AgentProfileSettings() {
   const profilePhaseModels = selectedProfile.phaseModels || DEFAULT_PHASE_MODELS;
   const profilePhaseThinking = selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING;
 
-  // Migration: Convert old format to V2 if needed
-  const migrateToV2 = (oldConfig: PhaseModelConfig): PhaseModelConfigV2 => {
-    const modelMap: Record<ModelTypeShort, string> = {
-      'haiku': 'claude-haiku-4',
-      'sonnet': 'claude-sonnet-4',
-      'opus': 'claude-opus-4'
-    };
-    return {
-      spec: { profileId: activeProfileId || '', model: modelMap[oldConfig.spec] },
-      planning: { profileId: activeProfileId || '', model: modelMap[oldConfig.planning] },
-      coding: { profileId: activeProfileId || '', model: modelMap[oldConfig.coding] },
-      qa: { profileId: activeProfileId || '', model: modelMap[oldConfig.qa] }
-    };
-  };
-
-  // Get current phase config V2 (migrate if needed)
-  const currentPhaseModelsV2: PhaseModelConfigV2 = settings.customPhaseModelsV2 ||
-    (settings.customPhaseModels ? migrateToV2(settings.customPhaseModels) : migrateToV2(profilePhaseModels));
+  // Get current phase config V3 (with fallback chains)
+  const currentPhaseModelsV3: PhaseModelConfigV3 = getCurrentPhaseConfigV3(
+    settings,
+    profilePhaseModels,
+    activeProfileId || ''
+  );
 
   // Legacy: Keep for backward compat
   const currentPhaseModels: PhaseModelConfig = settings.customPhaseModels || profilePhaseModels;
@@ -122,9 +110,55 @@ export function AgentProfileSettings() {
   };
 
   const handlePhaseModelChangeV2 = async (phase: keyof PhaseModelConfigV2, value: ProfileModelPair) => {
-    // Save as custom config V2 (deviating from preset)
-    const newPhaseModelsV2 = { ...currentPhaseModelsV2, [phase]: value };
-    await saveSettings({ customPhaseModelsV2: newPhaseModelsV2 });
+    // Legacy - convert to V3
+    const updatedV3 = { ...currentPhaseModelsV3 };
+    updatedV3[phase as keyof PhaseModelConfigV3] = [value];
+    await saveSettings({ customPhaseModelsV3: updatedV3 });
+  };
+
+  // V3 Handlers: Add/Remove/Reorder fallbacks
+  const handleUpdateFallback = async (phase: keyof PhaseModelConfigV3, index: number, value: ProfileModelPair) => {
+    const updated = { ...currentPhaseModelsV3 };
+    const chain = [...updated[phase]];
+    chain[index] = value;
+    updated[phase] = chain;
+    await saveSettings({ customPhaseModelsV3: updated });
+  };
+
+  const handleAddFallback = async (phase: keyof PhaseModelConfigV3) => {
+    const updated = { ...currentPhaseModelsV3 };
+    const chain = [...updated[phase]];
+    // Add a placeholder - user will select model
+    chain.push({ profileId: '', model: '' });
+    updated[phase] = chain;
+    await saveSettings({ customPhaseModelsV3: updated });
+  };
+
+  const handleRemoveFallback = async (phase: keyof PhaseModelConfigV3, index: number) => {
+    const updated = { ...currentPhaseModelsV3 };
+    const chain = [...updated[phase]];
+    if (chain.length <= 1) return; // Keep at least one
+    chain.splice(index, 1);
+    updated[phase] = chain;
+    await saveSettings({ customPhaseModelsV3: updated });
+  };
+
+  const handleMoveFallbackUp = async (phase: keyof PhaseModelConfigV3, index: number) => {
+    if (index === 0) return; // Already at top
+    const updated = { ...currentPhaseModelsV3 };
+    const chain = [...updated[phase]];
+    [chain[index - 1], chain[index]] = [chain[index], chain[index - 1]]; // Swap
+    updated[phase] = chain;
+    await saveSettings({ customPhaseModelsV3: updated });
+  };
+
+  const handleMoveFallbackDown = async (phase: keyof PhaseModelConfigV3, index: number) => {
+    const updated = { ...currentPhaseModelsV3 };
+    const chain = [...updated[phase]];
+    if (index >= chain.length - 1) return; // Already at bottom
+    [chain[index], chain[index + 1]] = [chain[index + 1], chain[index]]; // Swap
+    updated[phase] = chain;
+    await saveSettings({ customPhaseModelsV3: updated });
   };
 
   const handlePhaseThinkingChange = async (phase: keyof PhaseThinkingConfig, value: ThinkingLevel) => {
@@ -298,14 +332,71 @@ export function AgentProfileSettings() {
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
-                      {/* Model Select */}
-                      <div className="space-y-1">
+                      {/* Model Fallback Chain */}
+                      <div className="space-y-2">
                         <Label className="text-xs text-muted-foreground">{t('agentProfile.model')}</Label>
-                        <MultiProfileModelSelect
-                          value={currentPhaseModelsV2[phase]}
-                          onChange={(value) => handlePhaseModelChangeV2(phase, value)}
-                          placeholder={t('settings:modelSelect.placeholder')}
-                        />
+                        {currentPhaseModelsV3[phase].map((fallback, index) => (
+                          <div key={index} className="flex items-center gap-2">
+                            <span className="text-xs min-w-[70px] text-muted-foreground">
+                              {index === 0 ? 'Primary:' : `Fallback ${index}:`}
+                            </span>
+                            <MultiProfileModelSelect
+                              value={fallback}
+                              onChange={(value) => handleUpdateFallback(phase, index, value)}
+                              placeholder={t('settings:modelSelect.placeholder')}
+                              className="flex-1"
+                            />
+                            {/* Reorder buttons */}
+                            {index > 0 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleMoveFallbackUp(phase, index)}
+                                className="h-8 w-8"
+                                title="Move up"
+                              >
+                                <ChevronUp className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {index < currentPhaseModelsV3[phase].length - 1 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleMoveFallbackDown(phase, index)}
+                                className="h-8 w-8"
+                                title="Move down"
+                              >
+                                <ChevronDown className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {/* Remove button */}
+                            {currentPhaseModelsV3[phase].length > 1 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleRemoveFallback(phase, index)}
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                title="Remove fallback"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                        {/* Add Fallback Button */}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleAddFallback(phase)}
+                          className="w-full text-xs h-8"
+                        >
+                          <Plus className="h-3 w-3 mr-1" />
+                          Add Fallback Model
+                        </Button>
                       </div>
                       {/* Thinking Level Select */}
                       <div className="space-y-1">
