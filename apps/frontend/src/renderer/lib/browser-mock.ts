@@ -161,6 +161,25 @@ const browserMockAPI: ElectronAPI = {
     }
   }),
 
+  // LiteLLM Proxy service operations
+  getLiteLLMStatus: async () => ({
+    success: true,
+    data: {
+      isRunning: false,
+      port: 4000,
+      error: undefined
+    }
+  }),
+  startLiteLLM: async () => ({
+    success: true
+  }),
+  stopLiteLLM: async () => ({
+    success: true
+  }),
+  restartLiteLLM: async () => ({
+    success: true
+  }),
+
   // GitHub API
   github: {
     getGitHubRepositories: async () => ({ success: true, data: [] }),

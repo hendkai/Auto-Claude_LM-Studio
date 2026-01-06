@@ -5,8 +5,8 @@
  * Displays empty state when no profiles exist.
  * Allows setting active profile, editing, and deleting profiles.
  */
-import { useState } from 'react';
-import { Plus, Trash2, Check, Server, Globe, Pencil } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Trash2, Check, Server, Globe, Pencil, Circle, Power } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
@@ -49,6 +49,98 @@ export function ProfileList({ onProfileSaved }: ProfileListProps) {
   const [deleteConfirmProfile, setDeleteConfirmProfile] = useState<APIProfile | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSettingActive, setIsSettingActive] = useState(false);
+  
+  // LiteLLM Proxy status
+  const [litellmStatus, setLitellmStatus] = useState<{ isRunning: boolean; port: number; error?: string } | null>(null);
+  const [isStartingLitellm, setIsStartingLitellm] = useState(false);
+  const [isStoppingLitellm, setIsStoppingLitellm] = useState(false);
+
+  // Check if any profile uses localhost:4000
+  const hasLiteLLMProfile = profiles.some(p => 
+    p.baseUrl.includes('localhost:4000') || p.baseUrl.includes('127.0.0.1:4000')
+  );
+
+  // Load LiteLLM status
+  const loadLitellmStatus = async () => {
+    if (!hasLiteLLMProfile) {
+      setLitellmStatus(null);
+      return;
+    }
+    try {
+      const result = await window.electronAPI.getLiteLLMStatus();
+      if (result.success && result.data) {
+        setLitellmStatus(result.data);
+      }
+    } catch (error) {
+      console.error('Failed to load LiteLLM status:', error);
+    }
+  };
+
+  // Refresh status periodically
+  useEffect(() => {
+    if (!hasLiteLLMProfile) return;
+    
+    loadLitellmStatus();
+    const interval = setInterval(loadLitellmStatus, 2000); // Check every 2 seconds
+    return () => clearInterval(interval);
+  }, [hasLiteLLMProfile]);
+
+  // Handle LiteLLM start/stop
+  const handleStartLitellm = async () => {
+    setIsStartingLitellm(true);
+    try {
+      const result = await window.electronAPI.startLiteLLM();
+      if (result.success) {
+        await loadLitellmStatus();
+        toast({
+          title: 'LiteLLM gestartet',
+          description: 'Der Proxy-Server läuft jetzt auf Port 4000',
+        });
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Fehler',
+          description: result.error || 'LiteLLM konnte nicht gestartet werden',
+        });
+      }
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Fehler',
+        description: 'LiteLLM konnte nicht gestartet werden',
+      });
+    } finally {
+      setIsStartingLitellm(false);
+    }
+  };
+
+  const handleStopLitellm = async () => {
+    setIsStoppingLitellm(true);
+    try {
+      const result = await window.electronAPI.stopLiteLLM();
+      if (result.success) {
+        await loadLitellmStatus();
+        toast({
+          title: 'LiteLLM gestoppt',
+          description: 'Der Proxy-Server wurde beendet',
+        });
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Fehler',
+          description: result.error || 'LiteLLM konnte nicht gestoppt werden',
+        });
+      }
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Fehler',
+        description: 'LiteLLM konnte nicht gestoppt werden',
+      });
+    } finally {
+      setIsStoppingLitellm(false);
+    }
+  };
 
   const handleDeleteProfile = async () => {
     if (!deleteConfirmProfile) return;
@@ -147,6 +239,58 @@ export function ProfileList({ onProfileSaved }: ProfileListProps) {
           {t('settings:apiProfiles.addButton')}
         </Button>
       </div>
+
+      {/* LiteLLM Proxy Status */}
+      {hasLiteLLMProfile && (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <Circle 
+                  className={cn(
+                    "h-3 w-3",
+                    litellmStatus?.isRunning ? "text-green-500 fill-green-500" : "text-red-500 fill-red-500"
+                  )} 
+                />
+                {litellmStatus?.isRunning && (
+                  <Circle className="h-3 w-3 text-green-500 fill-green-500 absolute animate-ping opacity-75" />
+                )}
+              </div>
+              <div>
+                <div className="font-medium text-sm">LiteLLM Proxy</div>
+                <div className="text-xs text-muted-foreground">
+                  {litellmStatus?.isRunning 
+                    ? `Läuft auf Port ${litellmStatus.port}`
+                    : 'Nicht gestartet'}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {litellmStatus?.isRunning ? (
+                <Button
+                  onClick={handleStopLitellm}
+                  disabled={isStoppingLitellm}
+                  variant="outline"
+                  size="sm"
+                >
+                  <Power className="h-4 w-4 mr-2" />
+                  {isStoppingLitellm ? 'Stoppt...' : 'Stoppen'}
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleStartLitellm}
+                  disabled={isStartingLitellm}
+                  variant="outline"
+                  size="sm"
+                >
+                  <Power className="h-4 w-4 mr-2" />
+                  {isStartingLitellm ? 'Startet...' : 'Starten'}
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Empty state */}
       {profiles.length === 0 && (

@@ -293,6 +293,12 @@ export interface ElectronAPI {
   testConnection: (baseUrl: string, apiKey: string, signal?: AbortSignal) => Promise<IPCResult<TestConnectionResult>>;
   discoverModels: (baseUrl: string, apiKey: string, signal?: AbortSignal) => Promise<IPCResult<DiscoverModelsResult>>;
 
+  // LiteLLM Proxy service operations
+  getLiteLLMStatus: () => Promise<IPCResult<{ isRunning: boolean; port: number; pid?: number; error?: string }>>;
+  startLiteLLM: () => Promise<IPCResult<void>>;
+  stopLiteLLM: () => Promise<IPCResult<void>>;
+  restartLiteLLM: () => Promise<IPCResult<void>>;
+
   // Dialog operations
   selectDirectory: () => Promise<string | null>;
   createProjectFolder: (location: string, name: string, initGit: boolean) => Promise<IPCResult<CreateProjectFolderResult>>;

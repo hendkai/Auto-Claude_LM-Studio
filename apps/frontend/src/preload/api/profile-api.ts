@@ -42,6 +42,12 @@ export interface ProfileAPI {
     apiKey: string,
     signal?: AbortSignal
   ) => Promise<IPCResult<DiscoverModelsResult>>;
+
+  // LiteLLM Proxy service operations
+  getLiteLLMStatus: () => Promise<IPCResult<{ isRunning: boolean; port: number; pid?: number; error?: string }>>;
+  startLiteLLM: () => Promise<IPCResult<void>>;
+  stopLiteLLM: () => Promise<IPCResult<void>>;
+  restartLiteLLM: () => Promise<IPCResult<void>>;
 }
 
 let testConnectionRequestId = 0;
@@ -140,5 +146,18 @@ export const createProfileAPI = (): ProfileAPI => ({
     const promise = ipcRenderer.invoke(channel, baseUrl, apiKey, requestId);
     console.log('[preload/profile-api] IPC invoke called, promise returned');
     return promise;
-  }
+  },
+
+  // LiteLLM Proxy service operations
+  getLiteLLMStatus: (): Promise<IPCResult<{ isRunning: boolean; port: number; pid?: number; error?: string }>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITELLM_GET_STATUS),
+
+  startLiteLLM: (): Promise<IPCResult<void>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITELLM_START),
+
+  stopLiteLLM: (): Promise<IPCResult<void>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITELLM_STOP),
+
+  restartLiteLLM: (): Promise<IPCResult<void>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.LITELLM_RESTART)
 });
