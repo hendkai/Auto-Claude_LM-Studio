@@ -1,3 +1,19 @@
+## 2.7.7 - LiteLLM Startup Reliability Improvements
+
+### 🐛 Bug Fixes
+
+- Improved LiteLLM startup reliability with better wait logic (up to 10 seconds, checking every 500ms)
+- Fixed server readiness detection by actually checking if port is listening
+- Better error messages when LiteLLM fails to start
+
+### 🛠️ Improvements
+
+- More detailed logging for troubleshooting LiteLLM startup issues
+- Server readiness is now verified by checking if port 4000 is actually in use
+- Connection test continues even if LiteLLM start fails (shows actual error to user)
+
+---
+
 ## 2.7.6 - LiteLLM Connection Test Fix
 
 ### 🐛 Bug Fixes
