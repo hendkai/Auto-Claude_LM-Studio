@@ -63,7 +63,7 @@ export function registerAgenteventsHandlers(
       // Send final plan state to renderer BEFORE unwatching
       // This ensures the renderer has the final subtask data (fixes 0/0 subtask bug)
       const finalPlan = fileWatcher.getCurrentPlan(taskId);
-      if (finalPlan) {
+      if (finalPlan && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send(IPC_CHANNELS.TASK_PROGRESS, taskId, finalPlan);
       }
 
@@ -114,20 +114,26 @@ export function registerAgenteventsHandlers(
             if (isActiveStatus && !hasIncompleteSubtasks) {
               console.log(`[Task ${taskId}] Fallback: Moving to human_review (process exited successfully)`);
               persistStatus('human_review');
+              // Check if window is still available before sending
+              if (!mainWindow.isDestroyed()) {
+                mainWindow.webContents.send(
+                  IPC_CHANNELS.TASK_STATUS_CHANGE,
+                  taskId,
+                  'human_review' as TaskStatus
+                );
+              }
+            }
+          } else {
+            notificationService.notifyTaskFailed(taskTitle, project.id, taskId);
+            persistStatus('human_review');
+            // Check if window is still available before sending
+            if (!mainWindow.isDestroyed()) {
               mainWindow.webContents.send(
                 IPC_CHANNELS.TASK_STATUS_CHANGE,
                 taskId,
                 'human_review' as TaskStatus
               );
             }
-          } else {
-            notificationService.notifyTaskFailed(taskTitle, project.id, taskId);
-            persistStatus('human_review');
-            mainWindow.webContents.send(
-              IPC_CHANNELS.TASK_STATUS_CHANGE,
-              taskId,
-              'human_review' as TaskStatus
-            );
           }
         }
       } catch (error) {
