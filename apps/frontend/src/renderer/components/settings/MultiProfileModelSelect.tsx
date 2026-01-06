@@ -198,8 +198,26 @@ export function MultiProfileModelSelect({
     const getDisplayText = () => {
         if (!value.profileId || !value.model) return placeholder;
 
-        const profile = profiles.find(p => p.id === value.profileId);
-        return `${profile?.name || value.profileId}: ${value.model}`;
+        // Find the profile in our loaded profileModels to get the display name
+        const profileData = profileModels.find(pm => pm.profileId === value.profileId);
+
+        if (profileData) {
+            // Use profile name from profileModels (already formatted)
+            return `${profileData.profileName}: ${value.model}`;
+        }
+
+        // Fallback: Try to extract from profileId
+        let displayName = value.profileId;
+        if (value.profileId.startsWith('oauth:')) {
+            displayName = value.profileId.replace('oauth:', '') + ' (OAuth)';
+        } else if (value.profileId.startsWith('api:')) {
+            // Try to find in API profiles
+            const apiProfileId = value.profileId.replace('api:', '');
+            const apiProfile = profiles.find(p => p.id === apiProfileId);
+            displayName = apiProfile ? `${apiProfile.name} (API)` : apiProfileId;
+        }
+
+        return `${displayName}: ${value.model}`;
     };
 
     return (
