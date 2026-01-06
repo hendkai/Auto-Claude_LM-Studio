@@ -24,6 +24,29 @@ Auto Claude uses the **Anthropic SDK** which expects API endpoints in Anthropic'
 
 ---
 
+## ✅ Tested Configuration
+
+This setup has been successfully tested with the following configuration:
+
+**Hardware:**
+- **GPU:** AMD Radeon RX 7900 XTX (24GB VRAM)
+- **Model:** `devstral-small-2-24b-instruct-2512` (15.21 GB)
+
+**Recommended LM Studio Settings (for RX 7900 XTX):**
+- **Context Length:** `32768` (leverage your 24GB VRAM!)
+- **GPU Offload:** `40/40` (full GPU offloading)
+- **CPU Thread Pool Size:** `9` (adjust based on your CPU)
+- **Evaluation Batch Size:** `1024` (higher = faster inference)
+- **Offload KV Cache to GPU Memory:** ✅ ON
+- **Keep Model in Memory:** ✅ ON
+- **Try mmap():** ✅ ON
+- **Flash Attention:** ✅ ON
+- **K/V Cache Quantization:** ❌ OFF (for maximum quality)
+
+> **💡 Tip:** With 24GB VRAM, you can push context length even higher (up to 65536) depending on your model and use case.
+
+---
+
 ## Step 1: Install LiteLLM
 
 ```bash
