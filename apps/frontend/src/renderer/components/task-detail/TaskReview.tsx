@@ -103,6 +103,7 @@ export function TaskReview({
         <LoadingMessage />
       ) : worktreeStatus?.exists && !stagedSuccess ? (
         <WorkspaceStatus
+          taskId={task.id}
           worktreeStatus={worktreeStatus}
           workspaceError={workspaceError}
           stageOnly={stageOnly}

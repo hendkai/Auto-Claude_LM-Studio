@@ -39,6 +39,8 @@ export const IPC_CHANNELS = {
   TASK_WORKTREE_OPEN_IN_TERMINAL: 'task:worktreeOpenInTerminal',
   TASK_WORKTREE_DETECT_TOOLS: 'task:worktreeDetectTools',  // Detect installed IDEs/terminals
   TASK_LIST_WORKTREES: 'task:listWorktrees',
+  TASK_WORKTREE_COMMIT_CHANGES: 'task:worktreeCommitChanges',  // Commit uncommitted changes in main project
+  TASK_WORKTREE_STASH_CHANGES: 'task:worktreeStashChanges',  // Stash uncommitted changes in main project
   TASK_ARCHIVE: 'task:archive',
   TASK_UNARCHIVE: 'task:unarchive',
 

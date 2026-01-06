@@ -10,6 +10,7 @@ export { WorkspaceStatus } from './WorkspaceStatus';
 export { MergePreviewSummary } from './MergePreviewSummary';
 export { QAFeedbackSection } from './QAFeedbackSection';
 export { DiscardDialog } from './DiscardDialog';
+export { CommitDialog } from './CommitDialog';
 export { DiffViewDialog } from './DiffViewDialog';
 export { ConflictDetailsDialog } from './ConflictDetailsDialog';
 export { LoadingMessage, NoWorkspaceMessage, StagedInProjectMessage } from './WorkspaceMessages';

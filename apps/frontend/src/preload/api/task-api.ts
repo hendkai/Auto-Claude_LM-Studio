@@ -55,6 +55,8 @@ export interface TaskAPI {
   worktreeOpenInIDE: (worktreePath: string, ide: SupportedIDE, customPath?: string) => Promise<IPCResult<{ opened: boolean }>>;
   worktreeOpenInTerminal: (worktreePath: string, terminal: SupportedTerminal, customPath?: string) => Promise<IPCResult<{ opened: boolean }>>;
   worktreeDetectTools: () => Promise<IPCResult<{ ides: Array<{ id: string; name: string; path: string; installed: boolean }>; terminals: Array<{ id: string; name: string; path: string; installed: boolean }> }>>;
+  worktreeCommitChanges: (taskId: string, commitMessage: string) => Promise<IPCResult<{ success: boolean; message: string }>>;
+  worktreeStashChanges: (taskId: string, stashMessage?: string) => Promise<IPCResult<{ success: boolean; message: string }>>;
   archiveTasks: (projectId: string, taskIds: string[], version?: string) => Promise<IPCResult<boolean>>;
   unarchiveTasks: (projectId: string, taskIds: string[]) => Promise<IPCResult<boolean>>;
 
@@ -152,6 +154,12 @@ export const createTaskAPI = (): TaskAPI => ({
 
   worktreeDetectTools: (): Promise<IPCResult<{ ides: Array<{ id: string; name: string; path: string; installed: boolean }>; terminals: Array<{ id: string; name: string; path: string; installed: boolean }> }>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_DETECT_TOOLS),
+
+  worktreeCommitChanges: (taskId: string, commitMessage: string): Promise<IPCResult<{ success: boolean; message: string }>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_COMMIT_CHANGES, taskId, commitMessage),
+
+  worktreeStashChanges: (taskId: string, stashMessage?: string): Promise<IPCResult<{ success: boolean; message: string }>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_STASH_CHANGES, taskId, stashMessage),
 
   archiveTasks: (projectId: string, taskIds: string[], version?: string): Promise<IPCResult<boolean>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_ARCHIVE, projectId, taskIds, version),

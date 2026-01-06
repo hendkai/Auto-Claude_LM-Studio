@@ -1250,16 +1250,38 @@ async function openInTerminal(dirPath: string, terminal: SupportedTerminal, cust
       // Linux: Use the configured terminal with execFileAsync
       if (terminal === 'system') {
         // Try common terminal emulators with proper argument arrays
-        try {
-          await execFileAsync('x-terminal-emulator', ['--working-directory', dirPath, '-e', 'bash']);
-        } catch {
+        // Prioritize Wayland terminals first
+        const terminals: Array<{ cmd: string; args: string[] }> = [
+          { cmd: 'foot', args: ['--working-directory', dirPath, 'bash'] },
+          { cmd: 'kitty', args: ['--directory', dirPath, 'bash'] },
+          { cmd: 'alacritty', args: ['--working-directory', dirPath, '-e', 'bash'] },
+          { cmd: 'wezterm', args: ['start', '--cwd', dirPath, '--', 'bash'] },
+          { cmd: 'x-terminal-emulator', args: ['--working-directory', dirPath, '-e', 'bash'] },
+          { cmd: 'gnome-terminal', args: ['--working-directory', dirPath] },
+          { cmd: 'konsole', args: ['--workdir', dirPath] },
+          { cmd: 'xfce4-terminal', args: ['--working-directory', dirPath] },
+        ];
+        
+        let opened = false;
+        for (const { cmd, args } of terminals) {
           try {
-            await execFileAsync('gnome-terminal', ['--working-directory', dirPath]);
-          } catch {
-            // xterm doesn't have --working-directory, use -e with a script
-            // Escape the path for shell use within the xterm command
+            await execFileAsync(cmd, args);
+            opened = true;
+            console.log('[Worktree] Opened terminal:', cmd);
+            break;
+          } catch (error) {
+            console.warn(`[Worktree] Failed to open ${cmd}:`, error instanceof Error ? error.message : error);
+            continue;
+          }
+        }
+        
+        if (!opened) {
+          // Last resort: xterm doesn't have --working-directory, use -e with a script
+          try {
             const escapedPath = escapeSingleQuotedPath(dirPath);
             await execFileAsync('xterm', ['-e', `cd '${escapedPath}' && bash`]);
+          } catch (error) {
+            throw new Error(`No terminal emulator found: ${error instanceof Error ? error.message : 'Unknown error'}`);
           }
         }
       } else {
@@ -2518,6 +2540,109 @@ export function registerWorktreeHandlers(
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to open in terminal'
+        };
+      }
+    }
+  );
+
+  /**
+   * Commit uncommitted changes in main project
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.TASK_WORKTREE_COMMIT_CHANGES,
+    async (_, taskId: string, commitMessage: string): Promise<IPCResult<{ success: boolean; message: string }>> => {
+      try {
+        const { task, project } = findTaskAndProject(taskId);
+        if (!task || !project) {
+          return { success: false, error: 'Task not found' };
+        }
+
+        if (!commitMessage || commitMessage.trim() === '') {
+          return { success: false, error: 'Commit message is required' };
+        }
+
+        // Stage all changes
+        const addResult = spawnSync('git', ['add', '.'], {
+          cwd: project.path,
+          encoding: 'utf-8',
+          stdio: 'pipe'
+        });
+
+        if (addResult.status !== 0) {
+          return {
+            success: false,
+            error: `Failed to stage changes: ${addResult.stderr || 'Unknown error'}`
+          };
+        }
+
+        // Commit changes
+        const commitResult = spawnSync('git', ['commit', '-m', commitMessage], {
+          cwd: project.path,
+          encoding: 'utf-8',
+          stdio: 'pipe'
+        });
+
+        if (commitResult.status !== 0) {
+          return {
+            success: false,
+            error: `Failed to commit: ${commitResult.stderr || 'Unknown error'}`
+          };
+        }
+
+        return {
+          success: true,
+          data: {
+            success: true,
+            message: 'Changes committed successfully'
+          }
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        };
+      }
+    }
+  );
+
+  /**
+   * Stash uncommitted changes in main project
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.TASK_WORKTREE_STASH_CHANGES,
+    async (_, taskId: string, stashMessage?: string): Promise<IPCResult<{ success: boolean; message: string }>> => {
+      try {
+        const { task, project } = findTaskAndProject(taskId);
+        if (!task || !project) {
+          return { success: false, error: 'Task not found' };
+        }
+
+        // Stash changes with optional message
+        const stashArgs = stashMessage ? ['stash', 'push', '-m', stashMessage] : ['stash', 'push'];
+        const stashResult = spawnSync('git', stashArgs, {
+          cwd: project.path,
+          encoding: 'utf-8',
+          stdio: 'pipe'
+        });
+
+        if (stashResult.status !== 0) {
+          return {
+            success: false,
+            error: `Failed to stash changes: ${stashResult.stderr || 'Unknown error'}`
+          };
+        }
+
+        return {
+          success: true,
+          data: {
+            success: true,
+            message: 'Changes stashed successfully'
+          }
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
         };
       }
     }

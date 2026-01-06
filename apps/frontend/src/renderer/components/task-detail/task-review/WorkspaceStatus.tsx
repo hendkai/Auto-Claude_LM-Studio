@@ -12,32 +12,16 @@ import {
   CheckCircle,
   GitCommit,
   Code,
-  Terminal
+  Terminal,
+  Archive
 } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '../../ui/button';
 import { Checkbox } from '../../ui/checkbox';
 import { cn } from '../../../lib/utils';
 import type { WorktreeStatus, MergeConflict, MergeStats, GitConflictInfo, SupportedIDE, SupportedTerminal } from '../../../../shared/types';
 import { useSettingsStore } from '../../../stores/settings-store';
-
-interface WorkspaceStatusProps {
-  worktreeStatus: WorktreeStatus;
-  workspaceError: string | null;
-  stageOnly: boolean;
-  mergePreview: { files: string[]; conflicts: MergeConflict[]; summary: MergeStats; gitConflicts?: GitConflictInfo; uncommittedChanges?: { hasChanges: boolean; files: string[]; count: number } | null } | null;
-  isLoadingPreview: boolean;
-  isMerging: boolean;
-  isDiscarding: boolean;
-  onShowDiffDialog: (show: boolean) => void;
-  onShowDiscardDialog: (show: boolean) => void;
-  onShowConflictDialog: (show: boolean) => void;
-  onLoadMergePreview: () => void;
-  onStageOnlyChange: (value: boolean) => void;
-  onMerge: () => void;
-  onClose?: () => void;
-  onSwitchToTerminals?: () => void;
-  onOpenInbuiltTerminal?: (id: string, cwd: string) => void;
-}
+import { CommitDialog } from './CommitDialog';
 
 /**
  * Displays the workspace status including change summary, merge preview, and action buttons
@@ -77,6 +61,7 @@ const TERMINAL_LABELS: Partial<Record<SupportedTerminal, string>> = {
 };
 
 export function WorkspaceStatus({
+  taskId,
   worktreeStatus,
   workspaceError,
   stageOnly,
@@ -97,6 +82,9 @@ export function WorkspaceStatus({
   const { settings } = useSettingsStore();
   const preferredIDE = settings.preferredIDE || 'vscode';
   const preferredTerminal = settings.preferredTerminal || 'system';
+  const [showCommitDialog, setShowCommitDialog] = useState(false);
+  const [isCommitting, setIsCommitting] = useState(false);
+  const [isStashing, setIsStashing] = useState(false);
 
   const handleOpenInIDE = async () => {
     if (!worktreeStatus.worktreePath) return;
@@ -121,6 +109,41 @@ export function WorkspaceStatus({
       );
     } catch (err) {
       console.error('Failed to open in terminal:', err);
+    }
+  };
+
+  const handleCommit = async (commitMessage: string) => {
+    setIsCommitting(true);
+    try {
+      const result = await window.electronAPI.worktreeCommitChanges(taskId, commitMessage);
+      if (result.success && result.data?.success) {
+        setShowCommitDialog(false);
+        // Reload merge preview to update uncommitted changes count
+        onLoadMergePreview();
+      } else {
+        console.error('Failed to commit:', result.error || result.data?.message);
+      }
+    } catch (error) {
+      console.error('Failed to commit changes:', error);
+    } finally {
+      setIsCommitting(false);
+    }
+  };
+
+  const handleStash = async () => {
+    setIsStashing(true);
+    try {
+      const result = await window.electronAPI.worktreeStashChanges(taskId);
+      if (result.success && result.data?.success) {
+        // Reload merge preview to update uncommitted changes count
+        onLoadMergePreview();
+      } else {
+        console.error('Failed to stash:', result.error || result.data?.message);
+      }
+    } catch (error) {
+      console.error('Failed to stash changes:', error);
+    } finally {
+      setIsStashing(false);
     }
   };
 
@@ -244,9 +267,40 @@ export function WorkspaceStatus({
               <p className="text-sm font-medium text-warning">
                 {uncommittedCount} uncommitted {uncommittedCount === 1 ? 'change' : 'changes'} in main project
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Commit or stash them in your terminal before staging to avoid conflicts.
+              <p className="text-xs text-muted-foreground mt-0.5 mb-2">
+                Commit or stash them before staging to avoid conflicts.
               </p>
+              <div className="flex gap-2 mt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCommitDialog(true)}
+                  disabled={isCommitting || isStashing}
+                  className="h-7 px-2 text-xs"
+                >
+                  <GitCommit className="h-3.5 w-3.5 mr-1" />
+                  Commit
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleStash}
+                  disabled={isCommitting || isStashing}
+                  className="h-7 px-2 text-xs"
+                >
+                  {isStashing ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      Stashing...
+                    </>
+                  ) : (
+                    <>
+                      <Archive className="h-3.5 w-3.5 mr-1" />
+                      Stash
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -445,6 +499,15 @@ export function WorkspaceStatus({
           </Button>
         </div>
       </div>
+
+      {/* Commit Dialog */}
+      <CommitDialog
+        open={showCommitDialog}
+        taskId={taskId}
+        isCommitting={isCommitting}
+        onOpenChange={setShowCommitDialog}
+        onCommit={handleCommit}
+      />
     </div>
   );
 }

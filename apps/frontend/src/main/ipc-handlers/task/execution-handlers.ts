@@ -443,17 +443,41 @@ export function registerTaskExecutionHandlers(
 
         // Restart QA process - use worktree path if it exists, otherwise main project
         // The QA process needs to run where the implementation_plan.json with completed subtasks is
-        const qaProjectPath = hasWorktree ? worktreePath : project.path;
+        const qaProjectPath = hasWorktree && worktreePath ? worktreePath : project.path;
+        
+        if (!qaProjectPath) {
+          console.error('[TASK_REVIEW] No valid project path for QA process');
+          return { 
+            success: false, 
+            error: 'No valid project path found for QA process' 
+          };
+        }
+        
         console.warn('[TASK_REVIEW] Starting QA process with projectPath:', qaProjectPath);
-        agentManager.startQAProcess(taskId, qaProjectPath, task.specId);
+        
+        try {
+          await agentManager.startQAProcess(taskId, qaProjectPath, task.specId);
+        } catch (error) {
+          console.error('[TASK_REVIEW] Failed to start QA process:', error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          return { 
+            success: false, 
+            error: `Failed to start QA process: ${errorMessage}` 
+          };
+        }
 
         const mainWindow = getMainWindow();
         if (mainWindow) {
-          mainWindow.webContents.send(
-            IPC_CHANNELS.TASK_STATUS_CHANGE,
-            taskId,
-            'in_progress'
-          );
+          try {
+            mainWindow.webContents.send(
+              IPC_CHANNELS.TASK_STATUS_CHANGE,
+              taskId,
+              'in_progress'
+            );
+          } catch (error) {
+            console.error('[TASK_REVIEW] Failed to send status change:', error);
+            // Don't fail the whole operation if status update fails
+          }
         }
       }
 
