@@ -1,6 +1,6 @@
-# Auto Claude
+# Auto Claude - LM Studio Development Fork
 
-**Autonomous multi-agent coding framework that plans, builds, and validates software for you.**
+**Autonomous multi-agent coding framework with local LLM support via LiteLLM**
 
 ![Auto Claude Kanban Board](.github/assets/Auto-Claude-Kanban.png)
 
@@ -11,44 +11,11 @@
 
 ---
 
-## Download
-
-### Stable Release
-
-<!-- STABLE_VERSION_BADGE -->
-[![Stable](https://img.shields.io/badge/stable-2.7.2-blue?style=flat-square)](https://github.com/AndyMik90/Auto-Claude/releases/tag/v2.7.2)
-<!-- STABLE_VERSION_BADGE_END -->
-
-<!-- STABLE_DOWNLOADS -->
-| Platform | Download |
-|----------|----------|
-| **Windows** | [Auto-Claude-2.7.2-win32-x64.exe](https://github.com/AndyMik90/Auto-Claude/releases/download/v2.7.2/Auto-Claude-2.7.2-win32-x64.exe) |
-| **macOS (Apple Silicon)** | [Auto-Claude-2.7.2-darwin-arm64.dmg](https://github.com/AndyMik90/Auto-Claude/releases/download/v2.7.2/Auto-Claude-2.7.2-darwin-arm64.dmg) |
-| **macOS (Intel)** | [Auto-Claude-2.7.2-darwin-x64.dmg](https://github.com/AndyMik90/Auto-Claude/releases/download/v2.7.2/Auto-Claude-2.7.2-darwin-x64.dmg) |
-| **Linux** | [Auto-Claude-2.7.2-linux-x86_64.AppImage](https://github.com/AndyMik90/Auto-Claude/releases/download/v2.7.2/Auto-Claude-2.7.2-linux-x86_64.AppImage) |
-| **Linux (Debian)** | [Auto-Claude-2.7.2-linux-amd64.deb](https://github.com/AndyMik90/Auto-Claude/releases/download/v2.7.2/Auto-Claude-2.7.2-linux-amd64.deb) |
-<!-- STABLE_DOWNLOADS_END -->
-
-### Beta Release
-
-> ⚠️ Beta releases may contain bugs and breaking changes. [View all releases](https://github.com/AndyMik90/Auto-Claude/releases)
-
-<!-- BETA_VERSION_BADGE -->
-[![Beta](https://img.shields.io/badge/beta-2.7.2--beta.10-orange?style=flat-square)](https://github.com/AndyMik90/Auto-Claude/releases/tag/v2.7.2-beta.10)
-<!-- BETA_VERSION_BADGE_END -->
-
-<!-- BETA_DOWNLOADS -->
-| Platform | Download |
-|----------|----------|
-| **Windows** | [Auto-Claude-2.7.2-beta.10-win32-x64.exe](https://github.com/AndyMik90/Auto-Claude/releases/download/v2.7.2-beta.10/Auto-Claude-2.7.2-beta.10-win32-x64.exe) |
-| **macOS (Apple Silicon)** | [Auto-Claude-2.7.2-beta.10-darwin-arm64.dmg](https://github.com/AndyMik90/Auto-Claude/releases/download/v2.7.2-beta.10/Auto-Claude-2.7.2-beta.10-darwin-arm64.dmg) |
-| **macOS (Intel)** | [Auto-Claude-2.7.2-beta.10-darwin-x64.dmg](https://github.com/AndyMik90/Auto-Claude/releases/download/v2.7.2-beta.10/Auto-Claude-2.7.2-beta.10-darwin-x64.dmg) |
-| **Linux** | [Auto-Claude-2.7.2-beta.10-linux-x86_64.AppImage](https://github.com/AndyMik90/Auto-Claude/releases/download/v2.7.2-beta.10/Auto-Claude-2.7.2-beta.10-linux-x86_64.AppImage) |
-| **Linux (Debian)** | [Auto-Claude-2.7.2-beta.10-linux-amd64.deb](https://github.com/AndyMik90/Auto-Claude/releases/download/v2.7.2-beta.10/Auto-Claude-2.7.2-beta.10-linux-amd64.deb) |
-| **Linux (Flatpak)** | [Auto-Claude-2.7.2-beta.10-linux-x86_64.flatpak](https://github.com/AndyMik90/Auto-Claude/releases/download/v2.7.2-beta.10/Auto-Claude-2.7.2-beta.10-linux-x86_64.flatpak) |
-<!-- BETA_DOWNLOADS_END -->
-
-> All releases include SHA256 checksums and VirusTotal scan results for security verification.
+> [!WARNING]
+> **This is a development fork!** This branch contains experimental features (LiteLLM support, local LLM integration) and may be unstable.
+> 
+> **For stable releases**, please visit the original repository:  
+> 🔗 **[AndyMik90/Auto-Claude](https://github.com/AndyMik90/Auto-Claude)**
 
 ---
 
@@ -65,11 +32,34 @@
 
 ## Quick Start
 
-1. **Download and install** the app for your platform
-2. **Open your project** - Select a git repository folder
-3. **Connect Claude** - The app will guide you through OAuth setup
-4. **Create a task** - Describe what you want to build
-5. **Watch it work** - Agents plan, code, and validate autonomously
+> **⚠️ Development Version**: This fork is experimental. For production use, see the [official releases](https://github.com/AndyMik90/Auto-Claude/releases).
+
+### Running from Source (Development)
+
+1. **Clone this repository**
+   ```bash
+   git clone https://github.com/hendkai/Auto-Claude_LM-Studio.git
+   cd Auto-Claude_LM-Studio
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm run install:all
+   ```
+
+3. **Set up LiteLLM (for local LLMs)**
+   - Follow [guides/LITELLM-SETUP.md](guides/LITELLM-SETUP.md)
+
+4. **Start development server**
+   ```bash
+   npm run dev
+   ```
+
+5. **Connect Claude** - The app will guide you through OAuth setup or LiteLLM profile configuration
+
+6. **Create a task** - Describe what you want to build
+
+7. **Watch it work** - Agents plan, code, and validate autonomously
 
 ---
 
@@ -202,9 +192,15 @@ We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 ## Community
 
-- **Discord** - [Join our community](https://discord.gg/KCXaPBr4Dj)
-- **Issues** - [Report bugs or request features](https://github.com/AndyMik90/Auto-Claude/issues)
-- **Discussions** - [Ask questions](https://github.com/AndyMik90/Auto-Claude/discussions)
+**For official support and community**, please visit the original repository:
+
+- **Original Repo** - [AndyMik90/Auto-Claude](https://github.com/AndyMik90/Auto-Claude)
+- **Discord** - [Join official community](https://discord.gg/KCXaPBr4Dj)
+- **Issues** - [Report bugs (original repo)](https://github.com/AndyMik90/Auto-Claude/issues)
+- **Discussions** - [Ask questions (original repo)](https://github.com/AndyMik90/Auto-Claude/discussions)
+
+**This fork (LM Studio/Development):**
+- **Issues** - [Fork-specific issues](https://github.com/hendkai/Auto-Claude_LM-Studio/issues)
 
 ---
 
