@@ -249,22 +249,27 @@ def merge_existing_build(
                     # Git conflicts were resolved OR path-mapped files were AI merged
                     # Changes are already written and staged - no need for git merge
                     _print_merge_success(
-                        no_commit, stats, spec_name=spec_name, keep_worktree=True
+                        no_commit, stats, spec_name=spec_name, keep_worktree=no_commit
                     )
 
-                    # Don't auto-delete worktree - let user test and manually cleanup
-                    # User can delete with: python auto-claude/run.py --spec <name> --discard
-                    # Or via UI "Delete Worktree" button
+                    # Auto-delete worktree after successful merge (unless stage-only mode)
+                    # In stage-only mode, keep worktree for user to review before committing
+                    if not no_commit:
+                        try:
+                            manager.remove_worktree(spec_name, delete_branch=True)
+                            debug(MODULE, f"Auto-deleted worktree after successful merge: {spec_name}")
+                        except Exception as e:
+                            debug_warning(MODULE, f"Failed to auto-delete worktree (non-fatal): {e}")
 
                     return True
                 else:
                     # No conflicts and no files merged - do standard git merge
                     success_result = manager.merge_worktree(
-                        spec_name, delete_after=False, no_commit=no_commit
+                        spec_name, delete_after=not no_commit, no_commit=no_commit
                     )
                     if success_result:
                         _print_merge_success(
-                            no_commit, stats, spec_name=spec_name, keep_worktree=True
+                            no_commit, stats, spec_name=spec_name, keep_worktree=no_commit
                         )
                         return True
             elif smart_result.get("git_conflicts"):
@@ -300,7 +305,7 @@ def merge_existing_build(
 
     # Fall back to standard git merge
     success_result = manager.merge_worktree(
-        spec_name, delete_after=False, no_commit=no_commit
+        spec_name, delete_after=not no_commit, no_commit=no_commit
     )
 
     if success_result:
@@ -315,9 +320,7 @@ def merge_existing_build(
             print(muted(f"  python auto-claude/run.py --spec {spec_name} --discard"))
         else:
             print_status("Your feature has been added to your project.", "success")
-            print()
-            print("When satisfied, delete the worktree:")
-            print(muted(f"  python auto-claude/run.py --spec {spec_name} --discard"))
+            # Worktree is automatically deleted by merge_worktree when delete_after=True
         return True
     else:
         print()
