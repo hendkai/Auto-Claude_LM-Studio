@@ -7,7 +7,7 @@ import { AgentState } from './agent-state';
 import { AgentEvents } from './agent-events';
 import { ProcessType, ExecutionProgressData } from './types';
 import { detectRateLimit, createSDKRateLimitInfo, getProfileEnv, detectAuthFailure } from '../rate-limit-detector';
-import { getAPIProfileEnv } from '../services/profile';
+import { getAPIProfileEnv, getProfileEnvForPair } from '../services/profile';
 import { projectStore } from '../project-store';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { parsePythonCommand, validatePythonPath } from '../python-detector';
@@ -339,10 +339,26 @@ export class AgentProcessManager {
     // Get Python environment (PYTHONPATH for bundled packages, etc.)
     const pythonEnv = pythonEnvManager.getPythonEnv();
 
-    // Get active API profile environment variables
+    // Get API profile environment variables
+    // Try to use phase-specific profile from settings, fallback to active profile
     let apiProfileEnv: Record<string, string> = {};
     try {
-      apiProfileEnv = await getAPIProfileEnv();
+      // Load settings to check for phase-specific configuration
+      const settings = await readSettingsFile();
+      const phaseModelsV2 = settings?.customPhaseModelsV2;
+
+      // Determine initial phase (spec-runner starts in spec, others in planning)
+      const initialPhase: 'spec' | 'planning' | 'coding' | 'qa' = isSpecRunner ? 'spec' : 'planning';
+
+      // If phase-specific config exists, use it
+      if (phaseModelsV2 && phaseModelsV2[initialPhase]) {
+        console.log(`[AgentProcess] Using phase-specific profile for ${initialPhase}:`, phaseModelsV2[initialPhase]);
+        apiProfileEnv = await getProfileEnvForPair(phaseModelsV2[initialPhase]);
+      } else {
+        // Fallback to active profile
+        console.log('[AgentProcess] No phase-specific config, using active profile');
+        apiProfileEnv = await getAPIProfileEnv();
+      }
     } catch (error) {
       console.error('[Agent Process] Failed to get API profile env:', error);
       // Continue with empty profile env (falls back to OAuth mode)
