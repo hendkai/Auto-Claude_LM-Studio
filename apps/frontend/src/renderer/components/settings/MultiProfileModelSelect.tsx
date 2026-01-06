@@ -66,12 +66,13 @@ export function MultiProfileModelSelect({
     const inputRef = useRef<HTMLInputElement>(null);
 
     /**
-     * Fetch models from all profiles
+     * Fetch models from all profiles (both API profiles and OAuth accounts)
      */
     const fetchAllProfileModels = async () => {
         setIsLoading(true);
         const results: ProfileModels[] = [];
 
+        // 1. Fetch from API Profiles
         for (const profile of profiles) {
             try {
                 const models = await discoverModels(
@@ -82,15 +83,45 @@ export function MultiProfileModelSelect({
 
                 if (models && Array.isArray(models) && models.length > 0) {
                     results.push({
-                        profileId: profile.id,
-                        profileName: profile.name,
+                        profileId: `api:${profile.id}`, // Prefix with 'api:' to distinguish
+                        profileName: `${profile.name} (API)`,
                         models
                     });
                 }
             } catch (err) {
-                console.warn(`[MultiProfileModelSelect] Failed to fetch models from ${profile.name}:`, err);
+                console.warn(`[MultiProfileModelSelect] Failed to fetch models from API profile ${profile.name}:`, err);
                 // Continue with other profiles
             }
+        }
+
+        // 2. Fetch from OAuth Claude Accounts
+        try {
+            const claudeProfilesResult = await window.electronAPI.getClaudeProfiles();
+            if (claudeProfilesResult.success && claudeProfilesResult.data) {
+                const authenticatedOAuthProfiles = claudeProfilesResult.data.profiles.filter(
+                    (p: any) => p.oauthToken || (p.isDefault && p.configDir)
+                );
+
+                // For each authenticated OAuth account, add Claude models
+                for (const oauthProfile of authenticatedOAuthProfiles) {
+                    // Claude OAuth accounts have access to the same models as API
+                    // We use a static list since OAuth uses claude.ai, not an API endpoint
+                    const claudeModels: ModelInfo[] = [
+                        { id: 'claude-sonnet-4', display_name: 'Claude Sonnet 4' },
+                        { id: 'claude-code', display_name: 'Claude Code' },
+                        { id: 'claude-haiku-4', display_name: 'Claude Haiku 4' },
+                        { id: 'claude-opus-4', display_name: 'Claude Opus 4' }
+                    ];
+
+                    results.push({
+                        profileId: `oauth:${oauthProfile.id}`, // Prefix with 'oauth:'
+                        profileName: `${oauthProfile.name} (OAuth)${oauthProfile.email ? ` - ${oauthProfile.email}` : ''}`,
+                        models: claudeModels
+                    });
+                }
+            }
+        } catch (err) {
+            console.warn('[MultiProfileModelSelect] Failed to fetch OAuth Claude accounts:', err);
         }
 
         setProfileModels(results);
