@@ -1,3 +1,20 @@
+## 2.7.5 - LiteLLM Proxy Fixes
+
+### 🐛 Bug Fixes
+
+- Fixed LiteLLM proxy not starting automatically when profile with `localhost:4000` is activated
+- Fixed LiteLLM not finding bundled packages by using `pythonEnvManager` for PYTHONPATH
+- Improved profile detection to handle normalized URLs (with/without trailing slashes)
+- Enhanced error logging for better troubleshooting of LiteLLM startup issues
+
+### 🛠️ Improvements
+
+- LiteLLM now uses venv Python if available, otherwise falls back to bundled/system Python
+- Added comprehensive debug logging for LiteLLM service operations
+- Better error messages when LiteLLM fails to start
+
+---
+
 ## 2.7.4 - LiteLLM Proxy Integration
 
 ### ✨ New Features
