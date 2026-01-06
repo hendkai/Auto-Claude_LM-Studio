@@ -260,18 +260,30 @@ export function registerProfileHandlers(): void {
             console.log(`[Profile] Testing LiteLLM connection, ensuring service is running...`);
             const litellmService = getLiteLLMService();
             const status = await litellmService.getStatus();
+            console.log(`[Profile] LiteLLM status before start:`, status);
             if (!status.isRunning) {
               console.log('[Profile] Starting LiteLLM for connection test...');
-              await litellmService.start();
-              // Wait a moment for LiteLLM to fully start
-              await new Promise((resolve) => setTimeout(resolve, 2000));
-              console.log('[Profile] LiteLLM started, proceeding with connection test');
+              try {
+                await litellmService.start();
+                console.log('[Profile] LiteLLM start() completed, verifying status...');
+                // Verify it's actually running
+                const newStatus = await litellmService.getStatus();
+                console.log(`[Profile] LiteLLM status after start:`, newStatus);
+                if (!newStatus.isRunning) {
+                  console.error('[Profile] LiteLLM start() returned but service is not running');
+                  // Don't throw - let the connection test fail naturally
+                }
+              } catch (startError) {
+                console.error('[Profile] LiteLLM start() threw error:', startError);
+                // Don't throw - let the connection test fail naturally
+                // This allows the user to see the actual connection error
+              }
             } else {
               console.log('[Profile] LiteLLM already running');
             }
           } catch (error) {
-            console.warn('[Profile] Failed to start LiteLLM for connection test:', error);
-            // Continue with test anyway - might be running externally
+            console.error('[Profile] Error checking/starting LiteLLM for connection test:', error);
+            // Continue with test anyway - might be running externally or user wants to see the error
           }
         }
 

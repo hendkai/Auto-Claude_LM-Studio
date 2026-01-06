@@ -248,7 +248,14 @@ litellm_settings:
       console.error(`[LiteLLM] ${error.trim()}`);
     });
 
+    let processExited = false;
+    let exitCode: number | null = null;
+    let exitSignal: string | null = null;
+
     this.process.on('exit', (code, signal) => {
+      processExited = true;
+      exitCode = code;
+      exitSignal = signal || null;
       console.log(`[LiteLLM] Process exited with code ${code}, signal ${signal}`);
       this.process = null;
       this.emit('stopped', { code, signal });
@@ -258,13 +265,45 @@ litellm_settings:
       console.error('[LiteLLM] Failed to start:', error);
       this.process = null;
       this.emit('error', error);
+      throw error;
     });
 
-    // Wait a bit to see if startup fails immediately
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Wait for server to start (check every 500ms, max 10 seconds)
+    let serverReady = false;
+    const maxWaitTime = 10000; // 10 seconds
+    const checkInterval = 500; // 500ms
+    const startTime = Date.now();
 
-    if (this.process.killed || !this.process.pid) {
-      throw new Error(`Failed to start LiteLLM: ${startupError || 'Unknown error'}`);
+    while (!serverReady && !processExited && (Date.now() - startTime) < maxWaitTime) {
+      await new Promise((resolve) => setTimeout(resolve, checkInterval));
+
+      // Check if process is still running
+      if (this.process && !this.process.killed && this.process.pid) {
+        // Check if server is ready by checking port
+        const portAvailable = await this.checkPortAvailable(this.DEFAULT_PORT);
+        if (!portAvailable) {
+          serverReady = true;
+          console.log('[LiteLLM] Server is ready (port is in use)');
+          break;
+        }
+      } else {
+        // Process died
+        break;
+      }
+    }
+
+    // Check final status
+    if (processExited) {
+      throw new Error(`LiteLLM process exited with code ${exitCode}${exitSignal ? `, signal ${exitSignal}` : ''}. ${startupError ? `Error: ${startupError}` : ''}`);
+    }
+
+    if (!serverReady) {
+      if (this.process && !this.process.killed && this.process.pid) {
+        // Process is running but server might not be ready yet
+        console.warn('[LiteLLM] Process is running but server readiness not confirmed. Continuing anyway...');
+      } else {
+        throw new Error(`Failed to start LiteLLM: ${startupError || 'Process did not start or exited immediately'}`);
+      }
     }
   }
 
