@@ -1,3 +1,17 @@
+## 2.7.6 - LiteLLM Connection Test Fix
+
+### 🐛 Bug Fixes
+
+- Fixed "Test Connection" failing for `localhost:4000` profiles by auto-starting LiteLLM before testing
+- LiteLLM now starts automatically when testing connection, not just when activating profile
+
+### 🛠️ Improvements
+
+- Added 2-second wait after LiteLLM startup to ensure service is ready before connection test
+- Better user experience: connection test now works immediately without manual LiteLLM startup
+
+---
+
 ## 2.7.5 - LiteLLM Proxy Fixes
 
 ### 🐛 Bug Fixes
