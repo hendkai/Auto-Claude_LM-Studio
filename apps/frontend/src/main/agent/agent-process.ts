@@ -5,7 +5,7 @@ import { app } from 'electron';
 import { EventEmitter } from 'events';
 import { AgentState } from './agent-state';
 import { AgentEvents } from './agent-events';
-import { ProcessType, ExecutionProgressData } from './types';
+import { ProcessType, ExecutionProgressData, AgentProcess } from './types';
 import { detectRateLimit, createSDKRateLimitInfo, getProfileEnv, detectAuthFailure } from '../rate-limit-detector';
 import { getAPIProfileEnv, getProfileEnvForPair } from '../services/profile';
 import { projectStore } from '../project-store';
@@ -251,7 +251,7 @@ export class AgentProcessManager {
         currentFallbackIndex: nextFallbackIndex,
         currentPhase: process.currentPhase, // Preserve current phase
         spawnArgs
-      };
+      } as AgentProcess;
       this.state.addProcess(taskId, tempProcess);
 
       // Emit execution progress update with new model
@@ -532,7 +532,7 @@ export class AgentProcessManager {
       // Determine initial phase (spec-runner starts in spec, others in planning)
       // Use current phase from existing process if available, otherwise default
       let initialPhase: 'spec' | 'planning' | 'coding' | 'qa' = isSpecRunner ? 'spec' : 'planning';
-      
+
       // Map execution phase to config phase
       if (existingProcess?.currentPhase) {
         const phaseMap: Record<string, 'spec' | 'planning' | 'coding' | 'qa'> = {
@@ -703,7 +703,7 @@ export class AgentProcessManager {
         if (line.trim()) {
           this.emitter.emit('log', taskId, line + '\n');
           processLog(line);
-          
+
           // Check for rate limit during execution (not just on exit)
           // Use allOutput (accumulated) instead of just line to detect repeated messages
           if (!rateLimitHandled) {
@@ -717,7 +717,7 @@ export class AgentProcessManager {
                 currentIndex: this.state.getProcess(taskId)?.currentFallbackIndex
               });
               rateLimitHandled = true;
-              
+
               // Try to switch to next fallback model (await to ensure it completes)
               // Use void to avoid blocking the log processing
               void (async () => {
@@ -736,7 +736,7 @@ export class AgentProcessManager {
               })();
             }
           }
-          
+
           if (isDebug) {
             console.log(`[Agent:${taskId}] ${line}`);
           }

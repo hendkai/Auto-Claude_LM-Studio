@@ -165,6 +165,25 @@
       "deleting": "Suppression..."
     }
   },
+  "network": {
+    "title": "Synchronisation réseau local",
+    "description": "Synchronisez les tâches directement avec d'autres instances Auto-Claude sur votre réseau local.",
+    "enable": {
+      "label": "Activer la découverte réseau",
+      "description": "Autoriser cet appareil à découvrir et être découvert par des pairs."
+    },
+    "peers": {
+      "title": "Pairs découverts",
+      "noPeers": "Aucun pair trouvé pour le moment.",
+      "checkNetwork": "Assurez-vous que l'autre ordinateur est sur le même réseau et que la synchronisation est activée.",
+      "connected": "Connecté",
+      "lastSeen": "Vu pour la dernière fois",
+      "unknownHost": "Hôte inconnu"
+    },
+    "actions": {
+      "syncNow": "Synchroniser maintenant"
+    }
+  },
   "modelSelect": {
     "placeholder": "Sélectionner un modèle ou saisir manuellement",
     "placeholderManual": "Saisir le nom du modèle (ex. : claude-3-5-sonnet-20241022)",

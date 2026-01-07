@@ -14,6 +14,7 @@ import { ClaudeCodeAPI, createClaudeCodeAPI } from './modules/claude-code-api';
 import { McpAPI, createMcpAPI } from './modules/mcp-api';
 import { ProfileAPI, createProfileAPI } from './profile-api';
 import { GiteaAPI, createGiteaAPI } from './modules/gitea-api';
+import { NetworkAPI, createNetworkAPI } from './network-api';
 
 export interface ElectronAPI extends
   ProjectAPI,
@@ -31,7 +32,8 @@ export interface ElectronAPI extends
   ClaudeCodeAPI,
   McpAPI,
   ProfileAPI,
-  GiteaAPI {
+  GiteaAPI,
+  NetworkAPI {
   github: GitHubAPI;
 }
 
@@ -52,6 +54,7 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createMcpAPI(),
   ...createProfileAPI(),
   ...createGiteaAPI(),
+  ...createNetworkAPI(),
   github: createGitHubAPI()
 });
 
@@ -72,7 +75,8 @@ export {
   createDebugAPI,
   createClaudeCodeAPI,
   createMcpAPI,
-  createGiteaAPI
+  createGiteaAPI,
+  createNetworkAPI
 };
 
 export type {
@@ -91,5 +95,6 @@ export type {
   DebugAPI,
   ClaudeCodeAPI,
   McpAPI,
-  GiteaAPI
+  GiteaAPI,
+  NetworkAPI
 };

@@ -37,6 +37,7 @@ import { setupErrorLogging } from './app-logger';
 import { initSentryMain } from './sentry';
 import { preWarmToolCache } from './cli-tool-manager';
 import { initializeClaudeProfileManager } from './claude-profile-manager';
+import { networkSyncManager } from './services/network-sync-manager';
 import type { AppSettings } from '../shared/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -347,6 +348,12 @@ app.whenReady().then(() => {
   // Setup IPC handlers (pass pythonEnvManager for Python path management)
   setupIpcHandlers(agentManager, terminalManager, () => mainWindow, pythonEnvManager);
 
+  // Initialize network sync manager
+  networkSyncManager.init().catch(err => {
+    console.error('Failed to initialize network sync manager:', err);
+  });
+
+
   // Create window
   createWindow();
 
@@ -376,13 +383,13 @@ app.whenReady().then(() => {
     const usageMonitor = getUsageMonitor();
     usageMonitor.start();
     console.warn('[main] Usage monitor initialized and started');
-    
+
     // Auto-start LiteLLM if active profile uses localhost:4000
     (async () => {
       try {
         const { loadProfilesFile } = await import('./services/profile');
         const profiles = await loadProfilesFile();
-        const activeProfile = profiles.profiles.find(p => p.isActive);
+        const activeProfile = profiles.profiles.find(p => p.id === profiles.activeProfileId);
         if (activeProfile) {
           const baseUrl = activeProfile.baseUrl?.toLowerCase() || '';
           if (baseUrl.includes('localhost:4000') || baseUrl.includes('127.0.0.1:4000')) {
@@ -460,6 +467,15 @@ app.on('before-quit', async () => {
   // Kill all terminal processes
   if (terminalManager) {
     await terminalManager.killAll();
+  }
+  // Stop network sync manager
+  if (networkSyncManager) {
+    try {
+      networkSyncManager.stop();
+      console.warn('[main] Network sync manager stopped');
+    } catch (err) {
+      console.error('[main] Failed to stop network sync manager:', err);
+    }
   }
 });
 

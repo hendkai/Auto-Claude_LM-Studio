@@ -19,7 +19,7 @@ import { useState } from 'react';
 import { Button } from '../../ui/button';
 import { Checkbox } from '../../ui/checkbox';
 import { cn } from '../../../lib/utils';
-import type { WorktreeStatus, MergeConflict, MergeStats, GitConflictInfo, SupportedIDE, SupportedTerminal } from '../../../../shared/types';
+import type { WorktreeStatus, MergeConflict, MergeStats, GitConflictInfo, SupportedIDE, SupportedTerminal, WorktreeMergeResult } from '../../../../shared/types';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { CommitDialog } from './CommitDialog';
 
@@ -59,6 +59,26 @@ const TERMINAL_LABELS: Partial<Record<SupportedTerminal, string>> = {
   konsole: 'Konsole',
   custom: 'Terminal'
 };
+
+interface WorkspaceStatusProps {
+  taskId: string;
+  worktreeStatus: WorktreeStatus;
+  workspaceError: string | null;
+  stageOnly: boolean;
+  mergePreview: WorktreeMergeResult | null;
+  isLoadingPreview: boolean;
+  isMerging: boolean;
+  isDiscarding: boolean;
+  onShowDiffDialog: (show: boolean) => void;
+  onShowDiscardDialog: (show: boolean) => void;
+  onShowConflictDialog: (show: boolean) => void;
+  onLoadMergePreview: () => void;
+  onStageOnlyChange: (active: boolean) => void;
+  onMerge: () => void;
+  onClose: () => void;
+  onSwitchToTerminals: () => void;
+  onOpenInbuiltTerminal: () => void;
+}
 
 export function WorkspaceStatus({
   taskId,
@@ -147,19 +167,25 @@ export function WorkspaceStatus({
     }
   };
 
-  const hasGitConflicts = mergePreview?.gitConflicts?.hasConflicts;
-  const hasUncommittedChanges = mergePreview?.uncommittedChanges?.hasChanges;
-  const uncommittedCount = mergePreview?.uncommittedChanges?.count || 0;
-  const hasAIConflicts = mergePreview && mergePreview.conflicts.length > 0;
+  // Extract preview data to handle nested structure (WorktreeMergeResult.preview)
+  const previewData = mergePreview?.preview;
+  const activeConflicts = previewData?.conflicts || mergePreview?.conflicts || [];
+  const activeGitConflicts = previewData?.gitConflicts || mergePreview?.gitConflicts;
+  const activeSummary = previewData?.summary || mergePreview?.stats;
+
+  const hasGitConflicts = activeGitConflicts?.hasConflicts;
+  const hasUncommittedChanges = previewData?.uncommittedChanges?.hasChanges;
+  const uncommittedCount = previewData?.uncommittedChanges?.count || 0;
+  const hasAIConflicts = activeConflicts.length > 0;
 
   // Check if branch needs rebase (main has advanced since spec was created)
   // This requires AI merge even if no explicit file conflicts are detected
-  const needsRebase = mergePreview?.gitConflicts?.needsRebase;
-  const commitsBehind = mergePreview?.gitConflicts?.commitsBehind || 0;
+  const needsRebase = activeGitConflicts?.needsRebase;
+  const commitsBehind = activeGitConflicts?.commitsBehind || 0;
 
   // Path-mapped files that need AI merge due to file renames
-  const pathMappedAIMergeCount = mergePreview?.summary?.pathMappedAIMergeCount || 0;
-  const totalRenames = mergePreview?.gitConflicts?.totalRenames || 0;
+  const pathMappedAIMergeCount = activeSummary?.pathMappedAIMergeCount || 0;
+  const totalRenames = activeGitConflicts?.totalRenames || 0;
 
   // Branch is behind if needsRebase is true and there are commits to catch up on
   // This triggers AI merge for path-mapped files even without explicit conflicts
@@ -349,14 +375,14 @@ export function WorkspaceStatus({
                   <CheckCircle className="h-4 w-4 text-success" />
                   <span className="text-sm font-medium text-success">Ready to merge</span>
                   <span className="text-xs text-muted-foreground ml-1">
-                    {mergePreview.summary.totalFiles} files
+                    {activeSummary?.totalFiles || 0} files
                   </span>
                 </>
               ) : (
                 <>
                   <AlertTriangle className="h-4 w-4 text-warning" />
                   <span className="text-sm font-medium text-warning">
-                    {mergePreview.conflicts.length} conflict{mergePreview.conflicts.length !== 1 ? 's' : ''}
+                    {activeConflicts.length} conflict{activeConflicts.length !== 1 ? 's' : ''}
                   </span>
                 </>
               )}
@@ -391,19 +417,19 @@ export function WorkspaceStatus({
         )}
 
         {/* Git Conflicts Details */}
-        {hasGitConflicts && mergePreview?.gitConflicts && (
+        {hasGitConflicts && activeGitConflicts && (
           <div className="text-xs text-muted-foreground pl-6">
-            Main branch has {mergePreview.gitConflicts.commitsBehind} new commit{mergePreview.gitConflicts.commitsBehind !== 1 ? 's' : ''}.
-            {mergePreview.gitConflicts.conflictingFiles.length > 0 && (
+            Main branch has {activeGitConflicts.commitsBehind} new commit{activeGitConflicts.commitsBehind !== 1 ? 's' : ''}.
+            {activeGitConflicts.conflictingFiles.length > 0 && (
               <span className="text-warning">
-                {' '}{mergePreview.gitConflicts.conflictingFiles.length} file{mergePreview.gitConflicts.conflictingFiles.length !== 1 ? 's' : ''} need merging.
+                {' '}{activeGitConflicts.conflictingFiles.length} file{activeGitConflicts.conflictingFiles.length !== 1 ? 's' : ''} need merging.
               </span>
             )}
           </div>
         )}
 
         {/* Branch Behind Details (no explicit conflicts but needs AI merge due to path mappings) */}
-        {!hasGitConflicts && isBranchBehind && mergePreview?.gitConflicts && (
+        {!hasGitConflicts && isBranchBehind && activeGitConflicts && (
           <div className="text-xs text-muted-foreground pl-6">
             Target branch has {commitsBehind} new commit{commitsBehind !== 1 ? 's' : ''} since this build started.
             {hasPathMappedMerges ? (

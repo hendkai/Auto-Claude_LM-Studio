@@ -3,6 +3,7 @@ import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir } from '../../../shared/con
 import type { IPCResult, TaskStartOptions, TaskStatus } from '../../../shared/types';
 import path from 'path';
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'fs';
+import { promises as fs } from 'fs';
 import { spawnSync } from 'child_process';
 import { AgentManager } from '../../agent';
 import { fileWatcher } from '../../file-watcher';
@@ -48,7 +49,7 @@ function safeReadFileSync(filePath: string): string | null {
   } catch (error) {
     // ENOENT (file not found) is expected, other errors should be logged
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      console.error(`[safeReadFileSync] Error reading ${filePath}:`, error);
+      console.error(`[safeReadFileSync] Error reading ${filePath}: `, error);
     }
     return null;
   }
@@ -246,7 +247,7 @@ export function registerTaskExecutionHandlers(
           if (DEBUG) {
             const delay = persistStart - ipcSentAt;
             const duration = Date.now() - persistStart;
-            console.log(`[TASK_START] File persistence: delayed ${delay}ms after IPC, completed in ${duration}ms`);
+            console.log(`[TASK_START] File persistence: delayed ${delay}ms after IPC, completed in ${duration} ms`);
           }
         } catch (err) {
           console.error('[TASK_START] Failed to persist plan status:', err);
@@ -298,7 +299,7 @@ export function registerTaskExecutionHandlers(
           if (DEBUG) {
             const delay = persistStart - ipcSentAt;
             const duration = Date.now() - persistStart;
-            console.log(`[TASK_STOP] File persistence: delayed ${delay}ms after IPC, completed in ${duration}ms`);
+            console.log(`[TASK_STOP] File persistence: delayed ${delay}ms after IPC, completed in ${duration} ms`);
           }
         } catch (err) {
           console.error('[TASK_STOP] Failed to persist plan status:', err);
@@ -345,7 +346,7 @@ export function registerTaskExecutionHandlers(
         try {
           writeFileSync(
             qaReportPath,
-            `# QA Review\n\nStatus: APPROVED\n\nReviewed at: ${new Date().toISOString()}\n`
+            `# QA Review\n\nStatus: APPROVED\n\nReviewed at: ${new Date().toISOString()} \n`
           );
         } catch (error) {
           console.error('[TASK_REVIEW] Failed to write QA report:', error);
@@ -409,7 +410,7 @@ export function registerTaskExecutionHandlers(
         try {
           writeFileSync(
             fixRequestPath,
-            `# QA Fix Request\n\nStatus: REJECTED\n\n## Feedback\n\n${feedback || 'No feedback provided'}\n\nCreated at: ${new Date().toISOString()}\n`
+            `# QA Fix Request\n\nStatus: REJECTED\n\n## Feedback\n\n${feedback || 'No feedback provided'} \n\nCreated at: ${new Date().toISOString()} \n`
           );
         } catch (error) {
           console.error('[TASK_REVIEW] Failed to write QA fix request:', error);
@@ -462,14 +463,14 @@ export function registerTaskExecutionHandlers(
 
         if (hasWorktree) {
           // Worktree exists - must use merge workflow
-          console.warn(`[TASK_UPDATE_STATUS] Blocked attempt to set status 'done' directly for task ${taskId}. Use merge workflow instead.`);
+          console.warn(`[TASK_UPDATE_STATUS] Blocked attempt to set status 'done' directly for task ${taskId}.Use merge workflow instead.`);
           return {
             success: false,
             error: "Cannot set status to 'done' directly. Complete the human review and merge the worktree changes instead."
           };
         } else {
           // No worktree - allow marking as done (limbo state recovery)
-          console.log(`[TASK_UPDATE_STATUS] Allowing status 'done' for task ${taskId} (no worktree found - limbo state)`);
+          console.log(`[TASK_UPDATE_STATUS] Allowing status 'done' for task ${taskId}(no worktree found - limbo state)`);
         }
       }
 
@@ -488,15 +489,15 @@ export function registerTaskExecutionHandlers(
         const MIN_SPEC_CONTENT_LENGTH = 100;
         let specContent = '';
         try {
-          if (existsSync(specFilePath)) {
-            specContent = readFileSync(specFilePath, 'utf-8');
-          }
+          // Use async access/reading to prevent main thread blocking
+          await fs.access(specFilePath);
+          specContent = await fs.readFile(specFilePath, 'utf-8');
         } catch {
           // Ignore read errors - treat as empty spec
         }
 
         if (!specContent || specContent.length < MIN_SPEC_CONTENT_LENGTH) {
-          console.warn(`[TASK_UPDATE_STATUS] Blocked attempt to set status 'human_review' for task ${taskId}. No spec has been created yet.`);
+          console.warn(`[TASK_UPDATE_STATUS] Blocked attempt to set status 'human_review' for task ${taskId}.No spec has been created yet.`);
           return {
             success: false,
             error: "Cannot move to human review - no spec has been created yet. The task must complete processing before review."
@@ -706,7 +707,7 @@ export function registerTaskExecutionHandlers(
       if (worktreeSpecDir && worktreeSpecDir !== specDir && existsSync(path.join(worktreeSpecDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN))) {
         planPathsToUpdate.push(path.join(worktreeSpecDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN));
       }
-      console.log(`[Recovery] Will update ${planPathsToUpdate.length} plan file(s):`, planPathsToUpdate);
+      console.log(`[Recovery] Will update ${planPathsToUpdate.length} plan file(s): `, planPathsToUpdate);
 
       try {
         // Read the plan to analyze subtask progress
@@ -751,13 +752,13 @@ export function registerTaskExecutionHandlers(
           plan.status = newStatus;
           plan.planStatus = newStatus === 'done' ? 'completed'
             : newStatus === 'in_progress' ? 'in_progress'
-            : newStatus === 'ai_review' ? 'review'
-            : newStatus === 'human_review' ? 'review'
-            : 'pending';
+              : newStatus === 'ai_review' ? 'review'
+                : newStatus === 'human_review' ? 'review'
+                  : 'pending';
           plan.updated_at = new Date().toISOString();
 
           // Add recovery note
-          plan.recoveryNote = `Task recovered from stuck state at ${new Date().toISOString()}`;
+          plan.recoveryNote = `Task recovered from stuck state at ${new Date().toISOString()} `;
 
           // Check if task is actually stuck or just completed and waiting for merge
           const { allCompleted } = checkSubtasksCompletion(plan);
@@ -775,10 +776,10 @@ export function registerTaskExecutionHandlers(
             for (const pathToUpdate of planPathsToUpdate) {
               try {
                 atomicWriteFileSync(pathToUpdate, planContent);
-                console.log(`[Recovery] Successfully wrote to: ${pathToUpdate}`);
+                console.log(`[Recovery] Successfully wrote to: ${pathToUpdate} `);
                 writeSucceededForComplete = true;
               } catch (writeError) {
-                console.error(`[Recovery] Failed to write plan file at ${pathToUpdate}:`, writeError);
+                console.error(`[Recovery] Failed to write plan file at ${pathToUpdate}: `, writeError);
                 // Continue trying other paths
               }
             }
@@ -839,10 +840,10 @@ export function registerTaskExecutionHandlers(
           for (const pathToUpdate of planPathsToUpdate) {
             try {
               atomicWriteFileSync(pathToUpdate, planContent);
-              console.log(`[Recovery] Successfully wrote to: ${pathToUpdate}`);
+              console.log(`[Recovery] Successfully wrote to: ${pathToUpdate} `);
               writeSucceeded = true;
             } catch (writeError) {
-              console.error(`[Recovery] Failed to write plan file at ${pathToUpdate}:`, writeError);
+              console.error(`[Recovery] Failed to write plan file at ${pathToUpdate}: `, writeError);
             }
           }
           if (!writeSucceeded) {
@@ -870,7 +871,7 @@ export function registerTaskExecutionHandlers(
                 taskId,
                 recovered: true,
                 newStatus,
-                message: `Task recovered but cannot restart: ${gitStatusForRestart.error || 'Git repository with commits required.'}`,
+                message: `Task recovered but cannot restart: ${gitStatusForRestart.error || 'Git repository with commits required.'} `,
                 autoRestarted: false
               }
             };

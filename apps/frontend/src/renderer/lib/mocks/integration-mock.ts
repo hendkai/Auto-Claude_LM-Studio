@@ -12,6 +12,7 @@ export const integrationMock = {
       githubEnabled: false,
       gitlabEnabled: false,
       graphitiEnabled: false,
+      giteaEnabled: false,
       enableFancyUi: true
     }
   }),
@@ -135,9 +136,9 @@ export const integrationMock = {
     }
   }),
 
-  onGitHubInvestigationProgress: () => () => {},
-  onGitHubInvestigationComplete: () => () => {},
-  onGitHubInvestigationError: () => () => {},
+  onGitHubInvestigationProgress: () => () => { },
+  onGitHubInvestigationComplete: () => () => { },
+  onGitHubInvestigationError: () => () => { },
 
   // GitHub OAuth Operations (gh CLI)
   checkGitHubCli: async () => ({
@@ -288,8 +289,8 @@ export const integrationMock = {
 
   // GitLab MR Review Operations (AI-powered)
   getGitLabMRReview: async () => null,
-  runGitLabMRReview: () => {},
-  runGitLabMRFollowupReview: () => {},
+  runGitLabMRReview: () => { },
+  runGitLabMRFollowupReview: () => { },
   postGitLabMRReview: async () => false,
   postGitLabMRNote: async () => false,
   mergeGitLabMR: async () => false,
@@ -299,9 +300,9 @@ export const integrationMock = {
   checkGitLabMRNewCommits: async () => ({ hasNewCommits: false }),
 
   // GitLab MR Review Event Listeners
-  onGitLabMRReviewProgress: () => () => {},
-  onGitLabMRReviewComplete: () => () => {},
-  onGitLabMRReviewError: () => () => {},
+  onGitLabMRReviewProgress: () => () => { },
+  onGitLabMRReviewComplete: () => () => { },
+  onGitLabMRReviewError: () => () => { },
 
   // GitLab OAuth Operations (glab CLI)
   checkGitLabCli: async () => ({
@@ -381,10 +382,10 @@ export const integrationMock = {
   }),
 
   // GitLab Event Listeners
-  onGitLabInvestigationProgress: () => () => {},
-  onGitLabInvestigationComplete: () => () => {},
-  onGitLabInvestigationError: () => () => {},
+  onGitLabInvestigationProgress: () => () => { },
+  onGitLabInvestigationComplete: () => () => { },
+  onGitLabInvestigationError: () => () => { },
 
   // OAuth device code event listener (for streaming device code during auth)
-  onGitHubAuthDeviceCode: () => () => {}
+  onGitHubAuthDeviceCode: () => () => { }
 };

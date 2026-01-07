@@ -76,6 +76,7 @@
 | **Dynamic Model Selection** | Supports Anthropic API + local LLMs via LiteLLM (LM Studio, Ollama) |
 | **GitHub/GitLab Integration** | Import issues, investigate with AI, create merge requests |
 | **Linear Integration** | Sync tasks with Linear for team progress tracking |
+| **Local Network Sync** | Sync tasks directly with other Auto-Claude instances on your local network |
 | **Cross-Platform** | Native desktop apps for Windows, macOS, and Linux |
 | **Auto-Updates** | App updates automatically when new versions are released |
 

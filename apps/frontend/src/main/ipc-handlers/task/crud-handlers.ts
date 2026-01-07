@@ -7,6 +7,7 @@ import { projectStore } from '../../project-store';
 import { titleGenerator } from '../../title-generator';
 import { AgentManager } from '../../agent';
 import { findTaskAndProject } from './shared';
+import { readSettingsFile } from '../../settings-utils';
 
 /**
  * Register task CRUD (Create, Read, Update, Delete) handlers
@@ -139,6 +140,40 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
 
         // Update metadata with saved image paths (without base64 data)
         taskMetadata.attachedImages = savedImages;
+      }
+
+      // CRITICAL FIX: Add V3 primary model configuration to task_metadata.json
+      // Backend phase_config.py reads from this file to determine which model to use.
+      // Without this, it falls back to default Sonnet even if GLM or other models are configured.
+      // This ensures the primary model from each phase's fallback chain is used.
+      try {
+        const settings = await readSettingsFile();
+        const phaseModelsV3 = settings?.customPhaseModelsV3;
+
+        if (phaseModelsV3) {
+          // Extract primary (first) model from each phase's fallback chain
+          // Backend expects: { isAutoProfile: true, phaseModels: { spec, planning, coding, qa } }
+          // Convert ProfileModelPair to just the model name (backend uses env vars for profile)
+          const phaseModels: Record<string, string> = {};
+
+          for (const phase of ['spec', 'planning', 'coding', 'qa'] as const) {
+            const fallbackChain = (phaseModelsV3 as any)[phase];
+            if (fallbackChain && fallbackChain.length > 0) {
+              // Use primary model (index 0)
+              phaseModels[phase] = fallbackChain[0].model;
+            }
+          }
+
+          // Only add if we have at least one phase configured
+          if (Object.keys(phaseModels).length > 0) {
+            taskMetadata.isAutoProfile = true;
+            taskMetadata.phaseModels = phaseModels as any;
+            console.warn('[TASK_CREATE] Added V3 primary model config to metadata:', phaseModels);
+          }
+        }
+      } catch (err) {
+        console.error('[TASK_CREATE] Failed to read V3 model config, continuing without it:', err);
+        // Continue without V3 config - backend will use defaults
       }
 
       // Create initial implementation_plan.json (task is created but not started)

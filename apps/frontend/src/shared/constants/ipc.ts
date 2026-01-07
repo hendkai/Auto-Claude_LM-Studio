@@ -520,5 +520,13 @@ export const IPC_CHANNELS = {
   // Sentry error reporting
   SENTRY_STATE_CHANGED: 'sentry:state-changed',  // Notify main process when setting changes
   GET_SENTRY_DSN: 'sentry:get-dsn',              // Get DSN from main process (env var)
-  GET_SENTRY_CONFIG: 'sentry:get-config'         // Get full Sentry config (DSN + sample rates)
+  GET_SENTRY_CONFIG: 'sentry:get-config',         // Get full Sentry config (DSN + sample rates)
+
+  // Network Sync
+  NETWORK_GET_PEERS: 'network:get-peers',
+  NETWORK_GET_ENABLED: 'network:get-enabled',
+  NETWORK_SET_ENABLED: 'network:set-enabled',
+  NETWORK_TRIGGER_SYNC: 'network:trigger-sync',
+  NETWORK_PEER_DISCOVERED: 'network:peer-discovered', // event
+  NETWORK_PEER_LOST: 'network:peer-lost' // event
 } as const;

@@ -89,5 +89,15 @@ export const workspaceMock = {
         { id: 'system', name: 'System Terminal', path: '', installed: true }
       ]
     }
+  }),
+
+  worktreeCommitChanges: async () => ({
+    success: true,
+    data: { success: true, message: 'Changes committed successfully' }
+  }),
+
+  worktreeStashChanges: async () => ({
+    success: true,
+    data: { success: true, message: 'Changes stashed successfully' }
   })
 };

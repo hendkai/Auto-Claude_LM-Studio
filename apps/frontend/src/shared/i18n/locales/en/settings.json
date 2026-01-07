@@ -37,6 +37,10 @@
       "title": "API Profiles",
       "description": "Custom API endpoint profiles"
     },
+    "network": {
+      "title": "Network Sync",
+      "description": "Sync with peers on local network"
+    },
     "updates": {
       "title": "Updates",
       "description": "Auto Claude updates"
@@ -164,6 +168,25 @@
       "cancel": "Cancel",
       "delete": "Delete",
       "deleting": "Deleting..."
+    }
+  },
+  "network": {
+    "title": "Local Network Sync",
+    "description": "Sync tasks directly with other Auto-Claude instances on your local network.",
+    "enable": {
+      "label": "Enable Network Discovery",
+      "description": "Allow this device to discover and be discovered by peers."
+    },
+    "peers": {
+      "title": "Discovered Peers",
+      "noPeers": "No peers found yet.",
+      "checkNetwork": "Make sure other computer is on the same network and has Sync enabled.",
+      "connected": "Connected",
+      "lastSeen": "Last seen",
+      "unknownHost": "Unknown Host"
+    },
+    "actions": {
+      "syncNow": "Sync Now"
     }
   },
   "modelSelect": {
