@@ -24,7 +24,7 @@ export class NetworkDiscovery extends EventEmitter {
     constructor(syncPort: number) {
         super();
         this.syncPort = syncPort;
-        this.socket = dgram.createSocket('udp4');
+        this.socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
         // Generate a session ID. For persistent identity we'd need to save this to a config file.
         // For now, a session ID is sufficient to distinguish "me" from "others"
@@ -52,6 +52,9 @@ export class NetworkDiscovery extends EventEmitter {
                 const address = this.socket.address();
                 console.log(`[NetworkDiscovery] Listening on ${address.address}:${address.port}`);
                 this.socket.setBroadcast(true);
+
+                const broadcastAddresses = this.getBroadcastAddresses();
+                console.log(`[NetworkDiscovery] Calculated broadcast addresses: ${JSON.stringify(broadcastAddresses)}`);
             } catch (e) {
                 console.error('[NetworkDiscovery] Error in listening handler', e);
             }
@@ -119,6 +122,7 @@ export class NetworkDiscovery extends EventEmitter {
         broadcastAddresses.forEach(addr => {
             try {
                 this.socket.send(msg, 0, msg.length, this.broadcastPort, addr);
+                // console.log(`[NetworkDiscovery] Sent broadcast to ${addr}`); // Too noisy for regular logs
             } catch (e) {
                 // ignore network unreachable
             }
@@ -127,10 +131,16 @@ export class NetworkDiscovery extends EventEmitter {
 
     private handleMessage(msg: Buffer, rinfo: dgram.RemoteInfo) {
         try {
-            const message = JSON.parse(msg.toString());
+            const rawMessage = msg.toString();
+            console.log(`[NetworkDiscovery] Received UDP packet from ${rinfo.address}:${rinfo.port}: ${rawMessage}`);
+
+            const message = JSON.parse(rawMessage);
 
             // Ignore own messages
-            if (message.id === this.deviceId) return;
+            if (message.id === this.deviceId) {
+                // console.log('[NetworkDiscovery] Ignoring own message');
+                return;
+            }
 
             if (message.type === 'HELLO') {
                 const peer: Peer = {
@@ -158,7 +168,7 @@ export class NetworkDiscovery extends EventEmitter {
                 }
             }
         } catch (err) {
-            // ignore invalid json
+            console.error('[NetworkDiscovery] Error parsing message:', err);
         }
     }
 

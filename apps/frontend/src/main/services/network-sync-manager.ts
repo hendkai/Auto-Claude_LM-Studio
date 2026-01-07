@@ -33,7 +33,7 @@ export class NetworkSyncManager {
             // For now, let's wait for explicit enable via IPC or setting
             // But for testing, we might want it on.
             // Let's check a setting ?
-            // this.setEnabled(true); 
+            // this.setEnabled(true);
         } catch (err) {
             logger.error('Failed to init NetworkSyncManager', err);
         }
