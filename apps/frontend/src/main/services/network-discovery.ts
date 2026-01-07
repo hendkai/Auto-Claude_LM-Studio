@@ -1,5 +1,5 @@
 import dgram from 'dgram';
-import { networkInterfaces } from 'os';
+import { networkInterfaces, hostname } from 'os';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -30,9 +30,8 @@ export class NetworkDiscovery extends EventEmitter {
         // For now, a session ID is sufficient to distinguish "me" from "others"
         this.deviceId = uuidv4();
 
-        // Get hostname usually from os.hostname(), but we can just use a random suffix if needed
-        // or just rely on what we can find. simpler:
-        this.hostname = process.env.COMPUTERNAME || process.env.HOSTNAME || 'Unknown Device';
+        // Get hostname reliably
+        this.hostname = hostname() || 'Unknown Device';
 
         this.setupSocket();
     }
