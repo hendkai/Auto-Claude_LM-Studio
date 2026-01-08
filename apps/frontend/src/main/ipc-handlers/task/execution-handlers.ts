@@ -517,6 +517,15 @@ export function registerTaskExecutionHandlers(
         // where the running process (or file watcher) reacts to the status change while still running.
         if (status !== 'in_progress' && agentManager.isRunning(taskId)) {
           console.warn('[TASK_UPDATE_STATUS] Stopping task due to status change away from in_progress:', taskId);
+
+          // Prevent race condition causing crash (simultaneous file access/event handling):
+          // 1. Unwatch immediately to prevent "progress" events from file updates
+          await fileWatcher.unwatch(taskId);
+          // 2. Tell agent manager to ignore the "exit" event for this specific kill
+          //    This prevents the exit handler from satisfying "on exit" logic (persistence)
+          //    while we represent the authoritative state change here
+          agentManager.setIgnoreExit(taskId, true);
+
           agentManager.killTask(taskId);
 
           // Give the process a moment to release file handles/locks
@@ -566,10 +575,13 @@ export function registerTaskExecutionHandlers(
             return { success: false, error: 'Claude authentication required' };
           }
 
-          console.warn('[TASK_UPDATE_STATUS] Auto-starting task:', taskId);
+          const autoStartBegin = Date.now();
+          console.warn('[TASK_UPDATE_STATUS] Auto-starting task:', taskId, 'at', autoStartBegin);
 
           // Start file watcher for this task
-          fileWatcher.watch(taskId, specDir);
+          const watchStartTime = Date.now();
+          await fileWatcher.watch(taskId, specDir);
+          console.log('[TASK_UPDATE_STATUS] FileWatcher.watch completed in', Date.now() - watchStartTime, 'ms');
 
           // Check if spec.md exists
           const specFilePath = path.join(specDir, AUTO_BUILD_PATHS.SPEC_FILE);
@@ -586,11 +598,14 @@ export function registerTaskExecutionHandlers(
             // No spec file - need to run spec_runner.py to create the spec
             const taskDescription = task.description || task.title;
             console.warn('[TASK_UPDATE_STATUS] Starting spec creation for:', task.specId);
-            agentManager.startSpecCreation(task.specId, project.path, taskDescription, specDir, task.metadata, baseBranchForUpdate);
+            const specCreateStartTime = Date.now();
+            await agentManager.startSpecCreation(task.specId, project.path, taskDescription, specDir, task.metadata, baseBranchForUpdate);
+            console.log('[TASK_UPDATE_STATUS] startSpecCreation completed in', Date.now() - specCreateStartTime, 'ms');
           } else if (needsImplementation) {
             // Spec exists but no subtasks - run run.py to create implementation plan and execute
             console.warn('[TASK_UPDATE_STATUS] Starting task execution (no subtasks) for:', task.specId);
-            agentManager.startTaskExecution(
+            const execStartTime = Date.now();
+            await agentManager.startTaskExecution(
               taskId,
               project.path,
               task.specId,
@@ -601,11 +616,13 @@ export function registerTaskExecutionHandlers(
                 useWorktree: task.metadata?.useWorktree
               }
             );
+            console.log('[TASK_UPDATE_STATUS] startTaskExecution (no subtasks) completed in', Date.now() - execStartTime, 'ms');
           } else {
             // Task has subtasks, start normal execution
             // Note: Parallel execution is handled internally by the agent
             console.warn('[TASK_UPDATE_STATUS] Starting task execution (has subtasks) for:', task.specId);
-            agentManager.startTaskExecution(
+            const execStartTime = Date.now();
+            await agentManager.startTaskExecution(
               taskId,
               project.path,
               task.specId,
@@ -616,7 +633,10 @@ export function registerTaskExecutionHandlers(
                 useWorktree: task.metadata?.useWorktree
               }
             );
+            console.log('[TASK_UPDATE_STATUS] startTaskExecution (has subtasks) completed in', Date.now() - execStartTime, 'ms');
           }
+
+          console.log('[TASK_UPDATE_STATUS] Auto-start sequence completed in', Date.now() - autoStartBegin, 'ms');
 
           // Notify renderer about status change
           if (mainWindow) {

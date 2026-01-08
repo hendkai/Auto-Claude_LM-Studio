@@ -34,6 +34,12 @@ export class AgentManager extends EventEmitter {
     swapCount: number;
   }> = new Map();
 
+  // Track tasks where exit events should be ignored (e.g. manual stop during status update)
+  private ignoreExitMap: Set<string> = new Set();
+
+  // Track tasks currently starting up to prevent double-start race conditions
+  private startingTasks: Set<string> = new Set();
+
   constructor() {
     super();
 
@@ -95,73 +101,84 @@ export class AgentManager extends EventEmitter {
     metadata?: SpecCreationMetadata,
     baseBranch?: string
   ): Promise<void> {
-    // Pre-flight auth check: Verify active profile has valid authentication
-    const profileManager = getClaudeProfileManager();
-    if (!profileManager.hasValidAuth()) {
-      this.emit('error', taskId, 'Claude authentication required. Please authenticate in Settings > Claude Profiles before starting tasks.');
+    // Prevent double-start race condition (e.g. auto-start + manual click)
+    if (this.startingTasks.has(taskId)) {
+      console.warn(`[AgentManager] Task ${taskId} is already starting. Ignoring duplicate start request.`);
       return;
     }
+    this.startingTasks.add(taskId);
 
-    const autoBuildSource = this.processManager.getAutoBuildSourcePath();
-
-    if (!autoBuildSource) {
-      this.emit('error', taskId, 'Auto-build source path not found. Please configure it in App Settings.');
-      return;
-    }
-
-    const specRunnerPath = path.join(autoBuildSource, 'runners', 'spec_runner.py');
-
-    if (!existsSync(specRunnerPath)) {
-      this.emit('error', taskId, `Spec runner not found at: ${specRunnerPath}`);
-      return;
-    }
-
-    // Get combined environment variables
-    const combinedEnv = this.processManager.getCombinedEnv(projectPath);
-
-    // spec_runner.py will auto-start run.py after spec creation completes
-    const args = [specRunnerPath, '--task', taskDescription, '--project-dir', projectPath];
-
-    // Pass spec directory if provided (for UI-created tasks that already have a directory)
-    if (specDir) {
-      args.push('--spec-dir', specDir);
-    }
-
-    // Pass base branch if specified (ensures worktrees are created from the correct branch)
-    if (baseBranch) {
-      args.push('--base-branch', baseBranch);
-    }
-
-    // Check if user requires review before coding
-    if (!metadata?.requireReviewBeforeCoding) {
-      // Auto-approve: When user starts a task from the UI without requiring review
-      args.push('--auto-approve');
-    }
-
-    // Pass model and thinking level configuration
-    // For auto profile, use phase-specific config; otherwise use single model/thinking
-    if (metadata?.isAutoProfile && metadata.phaseModels && metadata.phaseThinking) {
-      // Pass the spec phase model and thinking level to spec_runner
-      args.push('--model', metadata.phaseModels.spec);
-      args.push('--thinking-level', metadata.phaseThinking.spec);
-    } else if (metadata?.model) {
-      // Non-auto profile: use single model and thinking level
-      args.push('--model', metadata.model);
-      if (metadata.thinkingLevel) {
-        args.push('--thinking-level', metadata.thinkingLevel);
+    try {
+      // Pre-flight auth check: Verify active profile has valid authentication
+      const profileManager = getClaudeProfileManager();
+      if (!profileManager.hasValidAuth()) {
+        this.emit('error', taskId, 'Claude authentication required. Please authenticate in Settings > Claude Profiles before starting tasks.');
+        return;
       }
+
+      const autoBuildSource = this.processManager.getAutoBuildSourcePath();
+
+      if (!autoBuildSource) {
+        this.emit('error', taskId, 'Auto-build source path not found. Please configure it in App Settings.');
+        return;
+      }
+
+      const specRunnerPath = path.join(autoBuildSource, 'runners', 'spec_runner.py');
+
+      if (!existsSync(specRunnerPath)) {
+        this.emit('error', taskId, `Spec runner not found at: ${specRunnerPath}`);
+        return;
+      }
+
+      // Get combined environment variables
+      const combinedEnv = this.processManager.getCombinedEnv(projectPath);
+
+      // spec_runner.py will auto-start run.py after spec creation completes
+      const args = [specRunnerPath, '--task', taskDescription, '--project-dir', projectPath];
+
+      // Pass spec directory if provided (for UI-created tasks that already have a directory)
+      if (specDir) {
+        args.push('--spec-dir', specDir);
+      }
+
+      // Pass base branch if specified (ensures worktrees are created from the correct branch)
+      if (baseBranch) {
+        args.push('--base-branch', baseBranch);
+      }
+
+      // Check if user requires review before coding
+      if (!metadata?.requireReviewBeforeCoding) {
+        // Auto-approve: When user starts a task from the UI without requiring review
+        args.push('--auto-approve');
+      }
+
+      // Pass model and thinking level configuration
+      // For auto profile, use phase-specific config; otherwise use single model/thinking
+      if (metadata?.isAutoProfile && metadata.phaseModels && metadata.phaseThinking) {
+        // Pass the spec phase model and thinking level to spec_runner
+        args.push('--model', metadata.phaseModels.spec);
+        args.push('--thinking-level', metadata.phaseThinking.spec);
+      } else if (metadata?.model) {
+        // Non-auto profile: use single model and thinking level
+        args.push('--model', metadata.model);
+        if (metadata.thinkingLevel) {
+          args.push('--thinking-level', metadata.thinkingLevel);
+        }
+      }
+
+      // Workspace mode: --direct skips worktree isolation (default is isolated for safety)
+      if (metadata?.useWorktree === false) {
+        args.push('--direct');
+      }
+
+      // Store context for potential restart
+      this.storeTaskContext(taskId, projectPath, '', {}, true, taskDescription, specDir, metadata, baseBranch);
+
+      // Note: This is spec-creation but it chains to task-execution via run.py
+      await this.processManager.spawnProcess(taskId, autoBuildSource, args, combinedEnv, 'task-execution');
+    } finally {
+      this.startingTasks.delete(taskId);
     }
-
-    // Workspace mode: --direct skips worktree isolation (default is isolated for safety)
-    if (metadata?.useWorktree === false) {
-      args.push('--direct');
-    }
-
-    // Store context for potential restart
-    this.storeTaskContext(taskId, projectPath, '', {}, true, taskDescription, specDir, metadata, baseBranch);
-
-    // Note: This is spec-creation but it chains to task-execution via run.py
-    await this.processManager.spawnProcess(taskId, autoBuildSource, args, combinedEnv, 'task-execution');
   }
 
   /**
@@ -173,57 +190,68 @@ export class AgentManager extends EventEmitter {
     specId: string,
     options: TaskExecutionOptions = {}
   ): Promise<void> {
-    // Pre-flight auth check: Verify active profile has valid authentication
-    const profileManager = getClaudeProfileManager();
-    if (!profileManager.hasValidAuth()) {
-      this.emit('error', taskId, 'Claude authentication required. Please authenticate in Settings > Claude Profiles before starting tasks.');
+    // Prevent double-start race condition (e.g. auto-start + manual click)
+    if (this.startingTasks.has(taskId)) {
+      console.warn(`[AgentManager] Task ${taskId} is already starting. Ignoring duplicate start request.`);
       return;
     }
+    this.startingTasks.add(taskId);
 
-    const autoBuildSource = this.processManager.getAutoBuildSourcePath();
+    try {
+      // Pre-flight auth check: Verify active profile has valid authentication
+      const profileManager = getClaudeProfileManager();
+      if (!profileManager.hasValidAuth()) {
+        this.emit('error', taskId, 'Claude authentication required. Please authenticate in Settings > Claude Profiles before starting tasks.');
+        return;
+      }
 
-    if (!autoBuildSource) {
-      this.emit('error', taskId, 'Auto-build source path not found. Please configure it in App Settings.');
-      return;
+      const autoBuildSource = this.processManager.getAutoBuildSourcePath();
+
+      if (!autoBuildSource) {
+        this.emit('error', taskId, 'Auto-build source path not found. Please configure it in App Settings.');
+        return;
+      }
+
+      const runPath = path.join(autoBuildSource, 'run.py');
+
+      if (!existsSync(runPath)) {
+        this.emit('error', taskId, `Run script not found at: ${runPath}`);
+        return;
+      }
+
+      // Get combined environment variables
+      const combinedEnv = this.processManager.getCombinedEnv(projectPath);
+
+      const args = [runPath, '--spec', specId, '--project-dir', projectPath];
+
+      // Always use auto-continue when running from UI (non-interactive)
+      args.push('--auto-continue');
+
+      // Force: When user starts a task from the UI, that IS their approval
+      args.push('--force');
+
+      // Workspace mode: --direct skips worktree isolation (default is isolated for safety)
+      if (options.useWorktree === false) {
+        args.push('--direct');
+      }
+
+      // Pass base branch if specified (ensures worktrees are created from the correct branch)
+      if (options.baseBranch) {
+        args.push('--base-branch', options.baseBranch);
+      }
+
+      // Note: --parallel was removed from run.py CLI - parallel execution is handled internally by the agent
+      // The options.parallel and options.workers are kept for future use or logging purposes
+      // Note: Model configuration is read from task_metadata.json by the Python scripts,
+      // which allows per-phase configuration for planner, coder, and QA phases
+
+      // Store context for potential restart
+      this.storeTaskContext(taskId, projectPath, specId, options, false);
+
+      await this.processManager.spawnProcess(taskId, autoBuildSource, args, combinedEnv, 'task-execution');
+    } finally {
+      this.startingTasks.delete(taskId);
     }
-
-    const runPath = path.join(autoBuildSource, 'run.py');
-
-    if (!existsSync(runPath)) {
-      this.emit('error', taskId, `Run script not found at: ${runPath}`);
-      return;
-    }
-
-    // Get combined environment variables
-    const combinedEnv = this.processManager.getCombinedEnv(projectPath);
-
-    const args = [runPath, '--spec', specId, '--project-dir', projectPath];
-
-    // Always use auto-continue when running from UI (non-interactive)
-    args.push('--auto-continue');
-
-    // Force: When user starts a task from the UI, that IS their approval
-    args.push('--force');
-
-    // Workspace mode: --direct skips worktree isolation (default is isolated for safety)
-    if (options.useWorktree === false) {
-      args.push('--direct');
-    }
-
-    // Pass base branch if specified (ensures worktrees are created from the correct branch)
-    if (options.baseBranch) {
-      args.push('--base-branch', options.baseBranch);
-    }
-
-    // Note: --parallel was removed from run.py CLI - parallel execution is handled internally by the agent
-    // The options.parallel and options.workers are kept for future use or logging purposes
-    // Note: Model configuration is read from task_metadata.json by the Python scripts,
-    // which allows per-phase configuration for planner, coder, and QA phases
-
-    // Store context for potential restart
-    this.storeTaskContext(taskId, projectPath, specId, options, false);
-
-    await this.processManager.spawnProcess(taskId, autoBuildSource, args, combinedEnv, 'task-execution');
   }
 
   /**
@@ -441,5 +469,25 @@ export class AgentManager extends EventEmitter {
     }, 500);
 
     return true;
+  }
+
+  /**
+   * Set whether to ignore exit events for a specific task.
+   * Useful when manually stopping a task and handling cleanup elsewhere.
+   */
+  setIgnoreExit(taskId: string, ignore: boolean): void {
+    if (ignore) {
+      this.ignoreExitMap.add(taskId);
+      console.log(`[AgentManager] Ignoring exit events for task ${taskId}`);
+    } else {
+      this.ignoreExitMap.delete(taskId);
+    }
+  }
+
+  /**
+   * Check if exit events should be ignored for a specific task
+   */
+  shouldIgnoreExit(taskId: string): boolean {
+    return this.ignoreExitMap.has(taskId);
   }
 }

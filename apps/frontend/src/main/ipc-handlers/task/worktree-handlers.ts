@@ -1261,7 +1261,7 @@ async function openInTerminal(dirPath: string, terminal: SupportedTerminal, cust
           { cmd: 'konsole', args: ['--workdir', dirPath] },
           { cmd: 'xfce4-terminal', args: ['--working-directory', dirPath] },
         ];
-        
+
         let opened = false;
         for (const { cmd, args } of terminals) {
           try {
@@ -1274,7 +1274,7 @@ async function openInTerminal(dirPath: string, terminal: SupportedTerminal, cust
             continue;
           }
         }
-        
+
         if (!opened) {
           // Last resort: xterm doesn't have --working-directory, use -e with a script
           try {
@@ -1650,10 +1650,10 @@ export function registerWorktreeHandlers(
         const taskBaseBranch = getTaskBaseBranch(specDir);
         const projectMainBranch = project.settings?.mainBranch;
         const effectiveBaseBranch = taskBaseBranch || projectMainBranch;
-        
+
         if (effectiveBaseBranch) {
           args.push('--base-branch', effectiveBaseBranch);
-          debug('Using base branch:', effectiveBaseBranch, 
+          debug('Using base branch:', effectiveBaseBranch,
             `(source: ${taskBaseBranch ? 'task metadata' : 'project settings'})`);
         }
 
@@ -1733,8 +1733,8 @@ export function registerWorktreeHandlers(
               // Check if merge might have succeeded before the hang
               // Look for success indicators in the output
               const mayHaveSucceeded = stdout.includes('staged') ||
-                                       stdout.includes('Successfully merged') ||
-                                       stdout.includes('Changes from');
+                stdout.includes('Successfully merged') ||
+                stdout.includes('Changes from');
 
               if (mayHaveSucceeded) {
                 debug('TIMEOUT: Process hung but merge may have succeeded based on output');
@@ -1973,6 +1973,15 @@ export function registerWorktreeHandlers(
                     plan.status = newStatus;
                     plan.planStatus = planStatus;
                     plan.updated_at = new Date().toISOString();
+
+                    // If task is marked as done (merged), also mark all subtasks as completed
+                    // This ensures the progress bar shows 100% in the UI
+                    if (newStatus === 'done' && Array.isArray(plan.subtasks)) {
+                      plan.subtasks.forEach((subtask: any) => {
+                        subtask.status = 'completed';
+                      });
+                    }
+
                     if (staged) {
                       plan.stagedAt = new Date().toISOString();
                       plan.stagedInMainProject = true;
@@ -2182,10 +2191,10 @@ export function registerWorktreeHandlers(
         const taskBaseBranch = getTaskBaseBranch(specDir);
         const projectMainBranch = project.settings?.mainBranch;
         const effectiveBaseBranch = taskBaseBranch || projectMainBranch;
-        
+
         if (effectiveBaseBranch) {
           args.push('--base-branch', effectiveBaseBranch);
-          console.warn('[IPC] Using base branch for preview:', effectiveBaseBranch, 
+          console.warn('[IPC] Using base branch for preview:', effectiveBaseBranch,
             `(source: ${taskBaseBranch ? 'task metadata' : 'project settings'})`);
         }
 

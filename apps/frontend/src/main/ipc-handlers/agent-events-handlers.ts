@@ -15,7 +15,7 @@ import { titleGenerator } from '../title-generator';
 import { fileWatcher } from '../file-watcher';
 import { projectStore } from '../project-store';
 import { notificationService } from '../notification-service';
-import { persistPlanStatusSync, getPlanPath } from './task/plan-file-utils';
+import { persistPlanStatus, getPlanPath } from './task/plan-file-utils';
 import { findTaskWorktree } from '../worktree-paths';
 import { findTaskAndProject } from './task/shared';
 
@@ -30,6 +30,9 @@ export function registerAgenteventsHandlers(
   // ============================================
   // Agent Manager Events → Renderer
   // ============================================
+
+  // Cache last persisted status to debounce updates and prevent IO saturation
+  const lastTaskStatus = new Map<string, TaskStatus>();
 
   agentManager.on('log', (taskId: string, log: string) => {
     const mainWindow = getMainWindow();
@@ -65,12 +68,23 @@ export function registerAgenteventsHandlers(
     }
   });
 
-  agentManager.on('exit', (taskId: string, code: number | null, processType: ProcessType) => {
+  agentManager.on('exit', async (taskId: string, code: number | null, processType: ProcessType) => {
+    // Check if we should ignore this exit event (e.g. manual stop during status update)
+    if (agentManager.shouldIgnoreExit(taskId)) {
+      console.log(`[Task ${taskId}] Ignoring exit event as requested (manual stop)`);
+      // Reset the flag immediately as it's a one-time suppression
+      agentManager.setIgnoreExit(taskId, false);
+      return;
+    }
+
     const mainWindow = getMainWindow();
     if (mainWindow) {
       // Get project info early for multi-project filtering (issue #723)
       const { project: exitProject } = findTaskAndProject(taskId);
       const exitProjectId = exitProject?.id;
+
+      // Cleanup status cache
+      lastTaskStatus.delete(taskId);
 
       // Send final plan state to renderer BEFORE unwatching
       // This ensures the renderer has the final subtask data (fixes 0/0 subtask bug)
@@ -79,7 +93,7 @@ export function registerAgenteventsHandlers(
         mainWindow.webContents.send(IPC_CHANNELS.TASK_PROGRESS, taskId, finalPlan, exitProjectId);
       }
 
-      fileWatcher.unwatch(taskId);
+      await fileWatcher.unwatch(taskId);
 
       if (processType === 'spec-creation') {
         console.warn(`[Task ${taskId}] Spec creation completed with code ${code}`);
@@ -119,9 +133,10 @@ export function registerAgenteventsHandlers(
 
           // Use shared utility for persisting status (prevents race conditions)
           // Persist to both main project AND worktree (if exists) for consistency
-          const persistStatus = (status: TaskStatus) => {
+          const persistStatus = async (status: TaskStatus) => {
             // Persist to main project
-            const mainPersisted = persistPlanStatusSync(mainPlanPath, status, projectId);
+            // Use async persistPlanStatus which uses locks, preventing race conditions with TASK_UPDATE_STATUS
+            const mainPersisted = await persistPlanStatus(mainPlanPath, status, projectId);
             if (mainPersisted) {
               console.warn(`[Task ${taskId}] Persisted status to main plan: ${status}`);
             }
@@ -136,11 +151,10 @@ export function registerAgenteventsHandlers(
                 taskSpecId,
                 AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN
               );
-              if (existsSync(worktreePlanPath)) {
-                const worktreePersisted = persistPlanStatusSync(worktreePlanPath, status, projectId);
-                if (worktreePersisted) {
-                  console.warn(`[Task ${taskId}] Persisted status to worktree plan: ${status}`);
-                }
+              // Use EAFP instead of existsSync to avoid race conditions
+              const worktreePersisted = await persistPlanStatus(worktreePlanPath, status, projectId);
+              if (worktreePersisted) {
+                console.warn(`[Task ${taskId}] Persisted status to worktree plan: ${status}`);
               }
             }
           };
@@ -157,7 +171,7 @@ export function registerAgenteventsHandlers(
 
             if (isActiveStatus && !hasIncompleteSubtasks) {
               console.warn(`[Task ${taskId}] Fallback: Moving to human_review (process exited successfully)`);
-              persistStatus('human_review');
+              await persistStatus('human_review');
               // Include projectId for multi-project filtering (issue #723)
               mainWindow.webContents.send(
                 IPC_CHANNELS.TASK_STATUS_CHANGE,
@@ -168,7 +182,7 @@ export function registerAgenteventsHandlers(
             }
           } else {
             notificationService.notifyTaskFailed(taskTitle, project.id, taskId);
-            persistStatus('human_review');
+            await persistStatus('human_review');
             // Include projectId for multi-project filtering (issue #723)
             mainWindow.webContents.send(
               IPC_CHANNELS.TASK_STATUS_CHANGE,
@@ -184,7 +198,14 @@ export function registerAgenteventsHandlers(
     }
   });
 
-  agentManager.on('execution-progress', (taskId: string, progress: ExecutionProgressData) => {
+  agentManager.on('execution-progress', async (taskId: string, progress: ExecutionProgressData) => {
+    // Check if we should ignore events for this task (e.g. manual stop)
+    // This prevents race conditions where "failed" progress events (triggered by kill)
+    // try to persist status via sync write while the async status update is in progress.
+    if (agentManager.shouldIgnoreExit(taskId)) {
+      return;
+    }
+
     const mainWindow = getMainWindow();
     if (mainWindow) {
       // Use shared helper to find task and project (issue #723 - deduplicate lookup)
@@ -214,6 +235,15 @@ export function registerAgenteventsHandlers(
           taskProjectId
         );
 
+        // PERFORMANCE FIX: Debounce status updates
+        // Only persist if the status has actually changed.
+        // This prevents IO saturation during high-volume logging phases (like "planning")
+        // where every log line simulates a "progress" event.
+        if (lastTaskStatus.get(taskId) === newStatus) {
+          return;
+        }
+        lastTaskStatus.set(taskId, newStatus);
+
         // CRITICAL: Persist status to plan file(s) to prevent flip-flop on task list refresh
         // When getTasks() is called, it reads status from the plan file. Without persisting,
         // the status in the file might differ from the UI, causing inconsistent state.
@@ -223,8 +253,9 @@ export function registerAgenteventsHandlers(
         if (task && project) {
           try {
             // Persist to main project plan file
+            // Use async persistence with locks
             const mainPlanPath = getPlanPath(project, task);
-            persistPlanStatusSync(mainPlanPath, newStatus, project.id);
+            await persistPlanStatus(mainPlanPath, newStatus, project.id);
 
             // Also persist to worktree plan file if it exists
             // This ensures consistency since getTasks() prefers worktree version
@@ -237,9 +268,8 @@ export function registerAgenteventsHandlers(
                 task.specId,
                 AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN
               );
-              if (existsSync(worktreePlanPath)) {
-                persistPlanStatusSync(worktreePlanPath, newStatus, project.id);
-              }
+              // Use EAFP instead of existsSync to avoid race conditions
+              await persistPlanStatus(worktreePlanPath, newStatus, project.id);
             }
           } catch (err) {
             // Ignore persistence errors - UI will still work, just might flip on refresh

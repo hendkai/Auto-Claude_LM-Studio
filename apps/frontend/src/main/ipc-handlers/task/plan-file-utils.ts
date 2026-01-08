@@ -18,7 +18,8 @@
  */
 
 import path from 'path';
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { promises as fs } from 'fs';
 import { AUTO_BUILD_PATHS, getSpecsDir } from '../../../shared/constants';
 import type { TaskStatus, Project, Task } from '../../../shared/types';
 import { projectStore } from '../../project-store';
@@ -100,15 +101,16 @@ export function mapStatusToPlanStatus(status: TaskStatus): string {
 export async function persistPlanStatus(planPath: string, status: TaskStatus, projectId?: string): Promise<boolean> {
   return withPlanLock(planPath, async () => {
     try {
-      // Read file directly without existence check to avoid TOCTOU race condition
-      const planContent = readFileSync(planPath, 'utf-8');
+      // Read file asynchronously to prevent main thread blocking
+      const planContent = await fs.readFile(planPath, 'utf-8');
       const plan = JSON.parse(planContent);
 
       plan.status = status;
       plan.planStatus = mapStatusToPlanStatus(status);
       plan.updated_at = new Date().toISOString();
 
-      writeFileSync(planPath, JSON.stringify(plan, null, 2));
+      // Write file asynchronously to prevent main thread blocking
+      await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
 
       // Invalidate tasks cache since status changed
       if (projectId) {
@@ -193,15 +195,16 @@ export async function updatePlanFile<T extends Record<string, unknown>>(
 ): Promise<T | null> {
   return withPlanLock(planPath, async () => {
     try {
-      // Read file directly without existence check to avoid TOCTOU race condition
-      const planContent = readFileSync(planPath, 'utf-8');
+      // Read file asynchronously to prevent main thread blocking
+      const planContent = await fs.readFile(planPath, 'utf-8');
       const plan = JSON.parse(planContent) as T;
 
       const updatedPlan = updater(plan);
       // Add updated_at timestamp - use type assertion since T extends Record<string, unknown>
       (updatedPlan as Record<string, unknown>).updated_at = new Date().toISOString();
 
-      writeFileSync(planPath, JSON.stringify(updatedPlan, null, 2));
+      // Write file asynchronously to prevent main thread blocking
+      await fs.writeFile(planPath, JSON.stringify(updatedPlan, null, 2));
       return updatedPlan;
     } catch (err) {
       // File not found is expected - return null
@@ -229,7 +232,7 @@ export async function createPlanIfNotExists(
   return withPlanLock(planPath, async () => {
     // Try to read the file first - if it exists, do nothing
     try {
-      readFileSync(planPath, 'utf-8');
+      await fs.access(planPath);
       return; // File exists, nothing to do
     } catch (err) {
       if (!isFileNotFoundError(err)) {
@@ -248,10 +251,10 @@ export async function createPlanIfNotExists(
       phases: []
     };
 
-    // Ensure directory exists - use try/catch pattern
+    // Ensure directory exists asynchronously
     const planDir = path.dirname(planPath);
     try {
-      mkdirSync(planDir, { recursive: true });
+      await fs.mkdir(planDir, { recursive: true });
     } catch (err) {
       // Directory might already exist or be created concurrently - that's fine
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
@@ -259,6 +262,7 @@ export async function createPlanIfNotExists(
       }
     }
 
-    writeFileSync(planPath, JSON.stringify(plan, null, 2));
+    // Write file asynchronously to prevent main thread blocking
+    await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
   });
 }
