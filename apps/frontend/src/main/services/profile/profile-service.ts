@@ -296,6 +296,32 @@ export async function getAPIProfileEnv(): Promise<Record<string, string>> {
 }
 
 /**
+ * Normalize base URL for SDK usage
+ * 
+ * - Ensures https:// prefix (auto-prepends if missing)
+ * - Removes trailing slashes
+ * - Returns empty string for invalid/empty URLs
+ */
+export function normalizeBaseUrlForSdk(baseUrl: string): string {
+  let normalized = baseUrl.trim();
+
+  // Return empty for empty input
+  if (!normalized) {
+    return '';
+  }
+
+  // Auto-prepend https:// if no protocol exists
+  if (!normalized.includes('://')) {
+    normalized = `https://${normalized}`;
+  }
+
+  // Remove trailing slashes
+  normalized = normalized.replace(/\/+$/, '');
+
+  return normalized;
+}
+
+/**
  * Test API profile connection
  *
  * Validates credentials by making a minimal API request to the /v1/models endpoint.
@@ -359,7 +385,7 @@ export async function testConnection(
     if (domainMatch) {
       const domain = domainMatch[1];
       if (domain.includes('anthropiic') || domain.includes('anthhropic') ||
-          domain.includes('anhtropic') || domain.length < 10) {
+        domain.includes('anhtropic') || domain.length < 10) {
         suggestions.push('Check for typos in domain name');
       }
     }
@@ -421,9 +447,9 @@ export async function testConnection(
           // 400/422 errors mean the endpoint is valid, just our test request was invalid
           // This is expected - we're just testing connectivity
           if (messagesErrorName === 'BadRequestError' ||
-              messagesErrorName === 'InvalidRequestError' ||
-              (messagesError instanceof Error && 'status' in messagesError &&
-               ((messagesError as { status?: number }).status === 400 ||
+            messagesErrorName === 'InvalidRequestError' ||
+            (messagesError instanceof Error && 'status' in messagesError &&
+              ((messagesError as { status?: number }).status === 400 ||
                 (messagesError as { status?: number }).status === 422))) {
             // Endpoint is valid, connection successful
             return {
