@@ -37,6 +37,10 @@
       "title": "Profils API",
       "description": "Profils d'endpoint API personnalisés"
     },
+    "usage": {
+      "title": "Statistiques d'utilisation",
+      "description": "Détails de consommation et limites"
+    },
     "updates": {
       "title": "Mises à jour",
       "description": "Mises à jour Auto Claude"

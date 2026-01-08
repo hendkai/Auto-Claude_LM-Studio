@@ -360,8 +360,8 @@ export function registerTerminalHandlers(
         const { command: claudeCmd, env: claudeEnv } = await getClaudeCliInvocationAsync();
         const pathPrefix = claudeEnv.PATH
           ? (process.platform === 'win32'
-              ? `set "PATH=${escapeShellArgWindows(claudeEnv.PATH)}" && `
-              : `export PATH=${escapeShellArg(claudeEnv.PATH)} && `)
+            ? `set "PATH=${escapeShellArgWindows(claudeEnv.PATH)}" && `
+            : `export PATH=${escapeShellArg(claudeEnv.PATH)} && `)
           : '';
         const shellClaudeCmd = process.platform === 'win32'
           ? `"${escapeShellArgWindows(claudeCmd)}"`
@@ -569,7 +569,7 @@ export function registerTerminalHandlers(
     async (): Promise<IPCResult<import('../../shared/types').ClaudeUsageSnapshot | null>> => {
       try {
         const monitor = getUsageMonitor();
-        const usage = monitor.getCurrentUsage();
+        const usage = await monitor.refresh();
         return { success: true, data: usage };
       } catch (error) {
         return {

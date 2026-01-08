@@ -12,6 +12,25 @@
 import { EventEmitter } from 'events';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { ClaudeUsageSnapshot } from '../../shared/types/agent';
+import { loadProfilesFile } from '../services/profile';
+import { APIProfile } from '../../shared/types/profile';
+
+interface GlmLimit {
+  type: string;
+  usage?: number;
+  currentValue?: number;
+  remaining?: number;
+  percentage?: number;
+  unit?: number;
+  number?: number; // max limit
+  nextResetTime?: number; // ms timestamp
+}
+
+interface GlmResponse {
+  data: {
+    limits: GlmLimit[];
+  }
+}
 
 export class UsageMonitor extends EventEmitter {
   private static instance: UsageMonitor;
@@ -80,6 +99,14 @@ export class UsageMonitor extends EventEmitter {
   }
 
   /**
+   * Force a usage check immediately
+   */
+  async refresh(): Promise<ClaudeUsageSnapshot | null> {
+    await this.checkUsageAndSwap();
+    return this.currentUsage;
+  }
+
+  /**
    * Check usage and trigger swap if thresholds exceeded
    */
   private async checkUsageAndSwap(): Promise<void> {
@@ -90,11 +117,28 @@ export class UsageMonitor extends EventEmitter {
     this.isChecking = true;
 
     try {
+      // Check for active custom API Profile first
+      const profilesFile = await loadProfilesFile();
+      const activeApiProfileId = profilesFile.activeProfileId;
+      const activeApiProfile = activeApiProfileId
+        ? profilesFile.profiles.find(p => p.id === activeApiProfileId)
+        : null;
+
+      if (activeApiProfile) {
+        const usage = await this.fetchApiProfileUsage(activeApiProfile);
+        if (usage) {
+          this.currentUsage = usage;
+          this.emit('usage-updated', usage);
+          return;
+        }
+      }
+
+      // Fallback to Claude Profile (OAuth)
       const profileManager = getClaudeProfileManager();
       const activeProfile = profileManager.getActiveProfile();
 
       if (!activeProfile) {
-        console.warn('[UsageMonitor] No active profile');
+        // console.warn('[UsageMonitor] No active profile');
         return;
       }
 
@@ -139,6 +183,119 @@ export class UsageMonitor extends EventEmitter {
   }
 
   /**
+   * Fetch usage for a custom API Profile
+   */
+  private async fetchApiProfileUsage(profile: APIProfile): Promise<ClaudeUsageSnapshot | null> {
+    // Check if it's a GLM profile
+    const isGlm = profile.baseUrl.includes('api.z.ai') || profile.baseUrl.includes('bigmodel.cn');
+
+    if (isGlm) {
+      const usage = await this.fetchGlmUsage(profile.apiKey || '', profile.id, profile.name);
+      if (usage) return usage;
+    }
+
+    // Generic API usage fetch could go here (e.g. standard Anthropic compatible)
+    // For now returning null so it doesn't break anything else
+    return null;
+  }
+
+  /**
+   * Fetch usage via GLM/Zhipu API
+   * Endpoint: https://api.z.ai/api/monitor/usage/quota/limit
+   */
+  private async fetchGlmUsage(
+    token: string,
+    profileId: string,
+    profileName: string
+  ): Promise<ClaudeUsageSnapshot | null> {
+    // Try Global (Z.ai) and CN (BigModel) endpoints
+    const endpoints = [
+      'https://api.z.ai/api/monitor/usage/quota/limit',
+      'https://open.bigmodel.cn/api/monitor/usage/quota/limit'
+    ];
+
+    for (const url of endpoints) {
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            // GLM API uses generic Authorization header (often without Bearer prefix based on reference impl)
+            // But let's try raw token first as seen in Rust implementation
+            'Authorization': token,
+            'Accept-Language': 'en-US,en',
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          continue; // Try next endpoint
+        }
+
+        const rawData = await response.json();
+        // Handle potentially wrapped response (Rust impl handles "data" wrapper or direct)
+        // We defined interface assuming wrapper or direct check
+        const data = (rawData.data || rawData) as { limits: GlmLimit[] };
+
+        if (!data.limits || !Array.isArray(data.limits)) {
+          continue;
+        }
+
+        // Calculate generic usage stats from limits
+        // We find the limit with the highest percentage to represent "Session" (or general) usage
+        let maxPercent = 0;
+        let weeklyPercent = 0; // GLM doesn't distinguish strictly, so we map primarily to session
+        let nextReset: string | undefined;
+
+        for (const limit of data.limits) {
+          const pct = limit.percentage || 0;
+          if (pct > maxPercent) {
+            maxPercent = pct;
+            nextReset = limit.nextResetTime
+              ? this.formatResetTime(new Date(limit.nextResetTime).toISOString())
+              : undefined;
+          }
+        }
+
+        // Map to snapshot
+        const customUsageDetails = data.limits.map(limit => ({
+          label: limit.type,
+          value: `${limit.currentValue}${limit.unit} / ${limit.number}${limit.unit}`, // e.g. "1500 TOKEN / 10000 TOKEN" - can be refined if units are just strings
+          rawLabel: limit.type, // Store original type
+          rawValue: typeof limit.currentValue === 'number' && typeof limit.number === 'number'
+            ? `${(limit.currentValue / 1000000).toFixed(2)}M / ${(limit.number / 1000000).toFixed(2)}M` // Assume large numbers are tokens
+            : `${limit.currentValue} / ${limit.number}`,
+          percentage: limit.percentage || 0,
+          resetTime: limit.nextResetTime
+            ? this.formatResetTime(new Date(limit.nextResetTime).toISOString())
+            : undefined
+        })).map(detail => ({
+          label: detail.rawLabel,
+          value: detail.rawLabel === 'TOKEN' ? detail.rawValue : detail.value, // Special formatting for TOKEN if needed, or just use raw strings
+          percentage: detail.percentage,
+          resetTime: detail.resetTime
+        }));
+
+        return {
+          sessionPercent: Math.round(maxPercent),
+          weeklyPercent: 0, // Not explicitly separate in GLM generic response usually
+          sessionResetTime: nextReset || 'Unknown',
+          weeklyResetTime: 'Unknown',
+          profileId,
+          profileName,
+          fetchedAt: new Date(),
+          limitType: 'session',
+          customUsageDetails
+        };
+
+      } catch (error) {
+        // Ignore and try next
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Fetch usage - HYBRID APPROACH
    * Tries API first, falls back to CLI if API fails
    */
@@ -152,9 +309,22 @@ export class UsageMonitor extends EventEmitter {
       return null;
     }
 
-    // Attempt 1: Direct API call (preferred)
+    // Ensure we have a token (either OAuth or manual)
+    const tokenToUse = oauthToken || (await profileManager.getProfileToken(profileId));
+    if (!tokenToUse) {
+      return null;
+    }
+
+    // Attempt 1: Direct API call (Antrophic / GLM)
     if (this.useApiMethod && oauthToken) {
-      const apiUsage = await this.fetchUsageViaAPI(oauthToken, profileId, profile.name);
+      // Try Anthropic first
+      let apiUsage = await this.fetchUsageViaAPI(oauthToken, profileId, profile.name);
+
+      // If Anthropic failed, try GLM
+      if (!apiUsage) {
+        apiUsage = await this.fetchGlmUsage(oauthToken, profileId, profile.name);
+      }
+
       if (apiUsage) {
         console.warn('[UsageMonitor] Successfully fetched via API');
         return apiUsage;

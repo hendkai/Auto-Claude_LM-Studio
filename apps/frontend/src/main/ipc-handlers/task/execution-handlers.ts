@@ -511,6 +511,19 @@ export function registerTaskExecutionHandlers(
       const planPath = getPlanPath(project, task);
 
       try {
+        // Auto-stop task when status changes AWAY from 'in_progress' and process IS running
+        // This handles the case where user drags a running task back to Planning/backlog
+        // CRITICAL: Stop the task BEFORE persisting the new status to prevent race conditions
+        // where the running process (or file watcher) reacts to the status change while still running.
+        if (status !== 'in_progress' && agentManager.isRunning(taskId)) {
+          console.warn('[TASK_UPDATE_STATUS] Stopping task due to status change away from in_progress:', taskId);
+          agentManager.killTask(taskId);
+
+          // Give the process a moment to release file handles/locks
+          console.debug('[TASK_UPDATE_STATUS] Waiting 200ms for process to cleanup...');
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+
         // Use shared utility for thread-safe plan file updates
         const persisted = await persistPlanStatus(planPath, status, project.id);
 
@@ -519,13 +532,6 @@ export function registerTaskExecutionHandlers(
           await createPlanIfNotExists(planPath, task, status);
           // Invalidate cache after creating new plan
           projectStore.invalidateTasksCache(project.id);
-        }
-
-        // Auto-stop task when status changes AWAY from 'in_progress' and process IS running
-        // This handles the case where user drags a running task back to Planning/backlog
-        if (status !== 'in_progress' && agentManager.isRunning(taskId)) {
-          console.warn('[TASK_UPDATE_STATUS] Stopping task due to status change away from in_progress:', taskId);
-          agentManager.killTask(taskId);
         }
 
         // Auto-start task when status changes to 'in_progress' and no process is running

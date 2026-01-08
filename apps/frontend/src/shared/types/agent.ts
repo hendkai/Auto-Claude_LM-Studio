@@ -45,6 +45,13 @@ export interface ClaudeUsageSnapshot {
   fetchedAt: Date;
   /** Which limit is closest to threshold ('session' or 'weekly') */
   limitType?: 'session' | 'weekly';
+  /** Optional detailed breakdown (e.g. for GLM: Token limits, Request limits) */
+  customUsageDetails?: Array<{
+    label: string;
+    value: string; // e.g. "1.2M / 10M"
+    percentage: number;
+    resetTime?: string;
+  }>;
 }
 
 /**

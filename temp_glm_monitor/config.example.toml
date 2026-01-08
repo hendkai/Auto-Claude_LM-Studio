@@ -1,0 +1,10 @@
+# GLM Usage Monitor Configuration File
+# Place this file at ~/.config/glm-usage-monitor/config.toml
+
+[api]
+# Base URL for the GLM API (optional, default: https://api.z.ai/api/anthropic)
+# base_url = "https://api.z.ai/api/anthropic"
+# Alternative: base_url = "https://open.bigmodel.cn/api/anthropic"
+
+# Authentication token for the API (required)
+auth_token = "your-token-here"

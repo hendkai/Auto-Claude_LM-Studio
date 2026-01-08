@@ -1,0 +1,39 @@
+[package]
+name = "glm-usage-monitor"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Realtime GLM Coding Plan usage monitor with TUI"
+authors = ["glm-usage-monitor"]
+
+[dependencies]
+# Terminal UI
+
+ratatui = "0.29.0"
+crossterm = "0.28"
+
+# Async runtime
+tokio = { version = "1.42", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Config
+dirs = "6.0"
+toml = "0.8"
+url = "2.5"
+
+# Date/time
+chrono = "0.4"
+time = "0.3"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }

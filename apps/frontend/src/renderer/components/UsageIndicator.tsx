@@ -48,14 +48,14 @@ export function UsageIndicator() {
 
   const colorClasses =
     maxUsage >= 95 ? 'text-red-500 bg-red-500/10 border-red-500/20' :
-    maxUsage >= 91 ? 'text-orange-500 bg-orange-500/10 border-orange-500/20' :
-    maxUsage >= 71 ? 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20' :
-    'text-green-500 bg-green-500/10 border-green-500/20';
+      maxUsage >= 91 ? 'text-orange-500 bg-orange-500/10 border-orange-500/20' :
+        maxUsage >= 71 ? 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20' :
+          'text-green-500 bg-green-500/10 border-green-500/20';
 
   const Icon =
     maxUsage >= 91 ? AlertCircle :
-    maxUsage >= 71 ? TrendingUp :
-    Activity;
+      maxUsage >= 71 ? TrendingUp :
+        Activity;
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -73,57 +73,96 @@ export function UsageIndicator() {
         </TooltipTrigger>
         <TooltipContent side="bottom" className="text-xs w-64">
           <div className="space-y-2">
-            {/* Session usage */}
-            <div>
-              <div className="flex items-center justify-between gap-4 mb-1">
-                <span className="text-muted-foreground font-medium">Session Usage</span>
-                <span className="font-semibold tabular-nums">{Math.round(usage.sessionPercent)}%</span>
-              </div>
-              {usage.sessionResetTime && (
-                <div className="text-[10px] text-muted-foreground">
-                  Resets: {usage.sessionResetTime}
+            {/* Custom Usage Details (e.g. GLM) */}
+            {usage.customUsageDetails && usage.customUsageDetails.length > 0 ? (
+              <>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">
+                  Usage Limits
                 </div>
-              )}
-              {/* Progress bar */}
-              <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
-                <div
-                  className={`h-full transition-all ${
-                    usage.sessionPercent >= 95 ? 'bg-red-500' :
-                    usage.sessionPercent >= 91 ? 'bg-orange-500' :
-                    usage.sessionPercent >= 71 ? 'bg-yellow-500' :
-                    'bg-green-500'
-                  }`}
-                  style={{ width: `${Math.min(usage.sessionPercent, 100)}%` }}
-                />
-              </div>
-            </div>
-
-            <div className="h-px bg-border" />
-
-            {/* Weekly usage */}
-            <div>
-              <div className="flex items-center justify-between gap-4 mb-1">
-                <span className="text-muted-foreground font-medium">Weekly Usage</span>
-                <span className="font-semibold tabular-nums">{Math.round(usage.weeklyPercent)}%</span>
-              </div>
-              {usage.weeklyResetTime && (
-                <div className="text-[10px] text-muted-foreground">
-                  Resets: {usage.weeklyResetTime}
+                {usage.customUsageDetails.map((detail, idx) => (
+                  <div key={idx} className="mb-3 last:mb-0">
+                    <div className="flex items-center justify-between gap-4 mb-1">
+                      <span className="text-muted-foreground font-medium">{detail.label}</span>
+                      <span className="font-semibold tabular-nums">{Math.round(detail.percentage)}%</span>
+                    </div>
+                    {detail.value && (
+                      <div className="text-[10px] text-muted-foreground mb-1">
+                        {detail.value}
+                      </div>
+                    )}
+                    {detail.resetTime && (
+                      <div className="text-[10px] text-muted-foreground">
+                        Resets: {detail.resetTime}
+                      </div>
+                    )}
+                    {/* Progress bar */}
+                    <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${detail.percentage >= 90 ? 'bg-red-500' :
+                            detail.percentage >= 75 ? 'bg-orange-500' :
+                              detail.percentage >= 50 ? 'bg-yellow-500' :
+                                'bg-green-500'
+                          }`}
+                        style={{ width: `${Math.min(detail.percentage || 0, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : (
+              /* Standard Anthropic Display */
+              <>
+                {/* Session usage */}
+                <div>
+                  <div className="flex items-center justify-between gap-4 mb-1">
+                    <span className="text-muted-foreground font-medium">Session Usage</span>
+                    <span className="font-semibold tabular-nums">{Math.round(usage.sessionPercent)}%</span>
+                  </div>
+                  {usage.sessionResetTime && (
+                    <div className="text-[10px] text-muted-foreground">
+                      Resets: {usage.sessionResetTime}
+                    </div>
+                  )}
+                  {/* Progress bar */}
+                  <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${usage.sessionPercent >= 95 ? 'bg-red-500' :
+                          usage.sessionPercent >= 91 ? 'bg-orange-500' :
+                            usage.sessionPercent >= 71 ? 'bg-yellow-500' :
+                              'bg-green-500'
+                        }`}
+                      style={{ width: `${Math.min(usage.sessionPercent, 100)}%` }}
+                    />
+                  </div>
                 </div>
-              )}
-              {/* Progress bar */}
-              <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
-                <div
-                  className={`h-full transition-all ${
-                    usage.weeklyPercent >= 99 ? 'bg-red-500' :
-                    usage.weeklyPercent >= 91 ? 'bg-orange-500' :
-                    usage.weeklyPercent >= 71 ? 'bg-yellow-500' :
-                    'bg-green-500'
-                  }`}
-                  style={{ width: `${Math.min(usage.weeklyPercent, 100)}%` }}
-                />
-              </div>
-            </div>
+
+                <div className="h-px bg-border" />
+
+                {/* Weekly usage */}
+                <div>
+                  <div className="flex items-center justify-between gap-4 mb-1">
+                    <span className="text-muted-foreground font-medium">Weekly Usage</span>
+                    <span className="font-semibold tabular-nums">{Math.round(usage.weeklyPercent)}%</span>
+                  </div>
+                  {usage.weeklyResetTime && (
+                    <div className="text-[10px] text-muted-foreground">
+                      Resets: {usage.weeklyResetTime}
+                    </div>
+                  )}
+                  {/* Progress bar */}
+                  <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all ${usage.weeklyPercent >= 99 ? 'bg-red-500' :
+                          usage.weeklyPercent >= 91 ? 'bg-orange-500' :
+                            usage.weeklyPercent >= 71 ? 'bg-yellow-500' :
+                              'bg-green-500'
+                        }`}
+                      style={{ width: `${Math.min(usage.weeklyPercent, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className="h-px bg-border" />
 

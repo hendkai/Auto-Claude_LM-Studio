@@ -20,7 +20,8 @@ import {
   Code,
   Bug,
   Server,
-  Network
+  Network,
+  Activity
 } from 'lucide-react';
 
 // GitLab icon component (lucide-react doesn't have one)
@@ -50,6 +51,7 @@ import { DisplaySettings } from './DisplaySettings';
 import { LanguageSettings } from './LanguageSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { IntegrationSettings } from './IntegrationSettings';
+import { UsageSettings } from './UsageSettings';
 import { AdvancedSettings } from './AdvancedSettings';
 import { DevToolsSettings } from './DevToolsSettings';
 import { DebugSettings } from './DebugSettings';
@@ -69,7 +71,7 @@ interface AppSettingsDialogProps {
 }
 
 // App-level settings sections
-export type AppSection = 'appearance' | 'display' | 'language' | 'devtools' | 'agent' | 'paths' | 'integrations' | 'api-profiles' | 'updates' | 'notifications' | 'debug' | 'network';
+export type AppSection = 'appearance' | 'display' | 'language' | 'devtools' | 'agent' | 'paths' | 'integrations' | 'usage' | 'api-profiles' | 'updates' | 'notifications' | 'debug' | 'network';
 
 interface NavItemConfig<T extends string> {
   id: T;
@@ -84,6 +86,7 @@ const appNavItemsConfig: NavItemConfig<AppSection>[] = [
   { id: 'agent', icon: Bot },
   { id: 'paths', icon: FolderOpen },
   { id: 'integrations', icon: Key },
+  { id: 'usage', icon: Activity },
   { id: 'api-profiles', icon: Server },
   { id: 'network', icon: Network },
   { id: 'updates', icon: Package },
@@ -205,6 +208,8 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
         return <GeneralSettings settings={settings} onSettingsChange={setSettings} section="paths" />;
       case 'integrations':
         return <IntegrationSettings settings={settings} onSettingsChange={setSettings} isOpen={open} />;
+      case 'usage':
+        return <UsageSettings />;
       case 'api-profiles':
         return <ProfileList />;
       case 'network':

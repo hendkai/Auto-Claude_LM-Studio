@@ -37,6 +37,10 @@
       "title": "API Profiles",
       "description": "Custom API endpoint profiles"
     },
+    "usage": {
+      "title": "Usage Statistics",
+      "description": "Usage limits and details"
+    },
     "network": {
       "title": "Network Sync",
       "description": "Sync with peers on local network"

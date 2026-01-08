@@ -28,7 +28,7 @@ import { cn } from '../../lib/utils';
 import { SettingsSection } from './SettingsSection';
 import { loadClaudeProfiles as loadGlobalClaudeProfiles } from '../../stores/claude-profile-store';
 import { useClaudeLoginTerminal } from '../../hooks/useClaudeLoginTerminal';
-import type { AppSettings, ClaudeProfile, ClaudeAutoSwitchSettings } from '../../../shared/types';
+import type { AppSettings, ClaudeProfile, ClaudeAutoSwitchSettings, ClaudeUsageSnapshot } from '../../../shared/types';
 
 interface IntegrationSettingsProps {
   settings: AppSettings;
@@ -76,6 +76,9 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
   // Listen for login terminal creation - makes the terminal visible so user can see OAuth flow
   useClaudeLoginTerminal();
 
+  // Usage stats state
+  const [usageStats, setUsageStats] = useState<ClaudeUsageSnapshot | null>(null);
+
   // Listen for OAuth authentication completion
   useEffect(() => {
     const unsubscribe = window.electronAPI.onTerminalOAuthToken(async (info) => {
@@ -89,6 +92,24 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
 
     return unsubscribe;
   }, []);
+
+  // Listen for usage updates
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onUsageUpdated((snapshot: ClaudeUsageSnapshot) => {
+      setUsageStats(snapshot);
+    });
+
+    // Request initial usage
+    if (isOpen) {
+      window.electronAPI.requestUsageUpdate().then((result) => {
+        if (result.success && result.data) {
+          setUsageStats(result.data);
+        }
+      });
+    }
+
+    return unsubscribe;
+  }, [isOpen]);
 
   const loadClaudeProfiles = async () => {
     setIsLoadingProfiles(true);
