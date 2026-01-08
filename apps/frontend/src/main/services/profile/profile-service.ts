@@ -45,30 +45,6 @@ export function validateBaseUrl(baseUrl: string): boolean {
 }
 
 /**
- * Normalize Base URL for SDK usage
- * 
- * Removes trailing slashes and '/v1' suffix to ensure compatibility 
- * with Anthropic SDK which automatically appends '/v1'.
- */
-export function normalizeBaseUrlForSdk(baseUrl: string): string {
-  if (!baseUrl) return '';
-
-  let normalized = baseUrl.trim();
-
-  // Remove trailing slashes
-  normalized = normalized.replace(/\/+$/, '');
-
-  // Remove /v1 suffix if present
-  if (normalized.endsWith('/v1')) {
-    normalized = normalized.slice(0, -3);
-    // Remove any remaining trailing slashes (e.g. from /v1/)
-    normalized = normalized.replace(/\/+$/, '');
-  }
-
-  return normalized;
-}
-
-/**
  * Validate API key format
  * Accepts various API key formats (Anthropic, OpenAI, custom)
  */
@@ -79,13 +55,8 @@ export function validateApiKey(apiKey: string): boolean {
 
   const trimmed = apiKey.trim();
 
-  // Check if it's a dummy value often used for local servers
-  if (trimmed === 'lm-studio' || trimmed === 'not-needed') {
-    return true;
-  }
-
   // Too short to be a real API key
-  if (trimmed.length < 8) { // Relaxed from 12 to 8 to allow 'lm-studio' length if user types it manually
+  if (trimmed.length < 12) {
     return false;
   }
 
@@ -100,7 +71,7 @@ export function validateApiKey(apiKey: string): boolean {
 
 /**
  * Validate that profile name is unique (case-insensitive, trimmed)
- * 
+ *
  * WARNING: This is for UX feedback only. Do NOT rely on this for correctness.
  * The actual uniqueness check happens atomically inside create/update operations
  * to prevent TOCTOU race conditions.
@@ -183,7 +154,7 @@ export async function createProfile(input: CreateProfileInput): Promise<APIProfi
     const profile: APIProfile = {
       id: generateProfileId(),
       name: input.name.trim(),
-      baseUrl: normalizeBaseUrlForSdk(input.baseUrl),
+      baseUrl: input.baseUrl.trim(),
       apiKey: input.apiKey.trim(),
       models: input.models,
       createdAt: now,
@@ -248,7 +219,7 @@ export async function updateProfile(input: UpdateProfileInput): Promise<APIProfi
     const updated: APIProfile = {
       ...existingProfile,
       name: input.name.trim(),
-      baseUrl: normalizeBaseUrlForSdk(input.baseUrl),
+      baseUrl: input.baseUrl.trim(),
       apiKey: input.apiKey.trim(),
       models: input.models,
       updatedAt: Date.now()
@@ -303,7 +274,7 @@ export async function getAPIProfileEnv(): Promise<Record<string, string>> {
 
   // Map profile fields to SDK env vars
   const envVars: Record<string, string> = {
-    ANTHROPIC_BASE_URL: normalizeBaseUrlForSdk(profile.baseUrl || ''),
+    ANTHROPIC_BASE_URL: profile.baseUrl || '',
     ANTHROPIC_AUTH_TOKEN: profile.apiKey || '',
     ANTHROPIC_MODEL: profile.models?.default || '',
     ANTHROPIC_DEFAULT_HAIKU_MODEL: profile.models?.haiku || '',
@@ -372,11 +343,6 @@ export async function testConnection(
   // Remove trailing slash
   normalizedUrl = normalizedUrl.replace(/\/+$/, '');
 
-  // Remove /v1 suffix if present, as the SDK appends it
-  if (normalizedUrl.endsWith('/v1')) {
-    normalizedUrl = normalizedUrl.slice(0, -3);
-  }
-
   // Helper function to generate URL suggestions
   const getUrlSuggestions = (url: string): string[] => {
     const suggestions: string[] = [];
@@ -393,7 +359,7 @@ export async function testConnection(
     if (domainMatch) {
       const domain = domainMatch[1];
       if (domain.includes('anthropiic') || domain.includes('anthhropic') ||
-        domain.includes('anhtropic') || domain.length < 10) {
+          domain.includes('anhtropic') || domain.length < 10) {
         suggestions.push('Check for typos in domain name');
       }
     }
@@ -455,9 +421,9 @@ export async function testConnection(
           // 400/422 errors mean the endpoint is valid, just our test request was invalid
           // This is expected - we're just testing connectivity
           if (messagesErrorName === 'BadRequestError' ||
-            messagesErrorName === 'InvalidRequestError' ||
-            (messagesError instanceof Error && 'status' in messagesError &&
-              ((messagesError as { status?: number }).status === 400 ||
+              messagesErrorName === 'InvalidRequestError' ||
+              (messagesError instanceof Error && 'status' in messagesError &&
+               ((messagesError as { status?: number }).status === 400 ||
                 (messagesError as { status?: number }).status === 422))) {
             // Endpoint is valid, connection successful
             return {
@@ -574,11 +540,6 @@ export async function discoverModels(
 
   // Remove trailing slash
   normalizedUrl = normalizedUrl.replace(/\/+$/, '');
-
-  // Remove /v1 suffix if present, as the SDK appends it
-  if (normalizedUrl.endsWith('/v1')) {
-    normalizedUrl = normalizedUrl.slice(0, -3);
-  }
 
   // Validate the normalized baseUrl
   if (!validateBaseUrl(normalizedUrl)) {

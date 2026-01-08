@@ -5,6 +5,7 @@ import {
   Minus,
   Eye,
   GitMerge,
+  GitPullRequest,
   FolderX,
   Loader2,
   RotateCcw,
@@ -12,16 +13,35 @@ import {
   CheckCircle,
   GitCommit,
   Code,
-  Terminal,
-  Archive
+  Terminal
 } from 'lucide-react';
-import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../ui/button';
 import { Checkbox } from '../../ui/checkbox';
 import { cn } from '../../../lib/utils';
-import type { WorktreeStatus, MergeConflict, MergeStats, GitConflictInfo, SupportedIDE, SupportedTerminal, WorktreeMergeResult } from '../../../../shared/types';
+import type { WorktreeStatus, MergeConflict, MergeStats, GitConflictInfo, SupportedIDE, SupportedTerminal } from '../../../../shared/types';
 import { useSettingsStore } from '../../../stores/settings-store';
-import { CommitDialog } from './CommitDialog';
+
+interface WorkspaceStatusProps {
+  worktreeStatus: WorktreeStatus;
+  workspaceError: string | null;
+  stageOnly: boolean;
+  mergePreview: { files: string[]; conflicts: MergeConflict[]; summary: MergeStats; gitConflicts?: GitConflictInfo; uncommittedChanges?: { hasChanges: boolean; files: string[]; count: number } | null } | null;
+  isLoadingPreview: boolean;
+  isMerging: boolean;
+  isDiscarding: boolean;
+  isCreatingPR?: boolean;
+  onShowDiffDialog: (show: boolean) => void;
+  onShowDiscardDialog: (show: boolean) => void;
+  onShowConflictDialog: (show: boolean) => void;
+  onLoadMergePreview: () => void;
+  onStageOnlyChange: (value: boolean) => void;
+  onMerge: () => void;
+  onShowPRDialog?: (show: boolean) => void;
+  onClose?: () => void;
+  onSwitchToTerminals?: () => void;
+  onOpenInbuiltTerminal?: (id: string, cwd: string) => void;
+}
 
 /**
  * Displays the workspace status including change summary, merge preview, and action buttons
@@ -60,28 +80,7 @@ const TERMINAL_LABELS: Partial<Record<SupportedTerminal, string>> = {
   custom: 'Terminal'
 };
 
-interface WorkspaceStatusProps {
-  taskId: string;
-  worktreeStatus: WorktreeStatus;
-  workspaceError: string | null;
-  stageOnly: boolean;
-  mergePreview: WorktreeMergeResult | null;
-  isLoadingPreview: boolean;
-  isMerging: boolean;
-  isDiscarding: boolean;
-  onShowDiffDialog: (show: boolean) => void;
-  onShowDiscardDialog: (show: boolean) => void;
-  onShowConflictDialog: (show: boolean) => void;
-  onLoadMergePreview: () => void;
-  onStageOnlyChange: (active: boolean) => void;
-  onMerge: () => void;
-  onClose: () => void;
-  onSwitchToTerminals: () => void;
-  onOpenInbuiltTerminal: () => void;
-}
-
 export function WorkspaceStatus({
-  taskId,
   worktreeStatus,
   workspaceError,
   stageOnly,
@@ -89,22 +88,22 @@ export function WorkspaceStatus({
   isLoadingPreview,
   isMerging,
   isDiscarding,
+  isCreatingPR,
   onShowDiffDialog,
   onShowDiscardDialog,
   onShowConflictDialog,
   onLoadMergePreview,
   onStageOnlyChange,
   onMerge,
+  onShowPRDialog,
   onClose,
   onSwitchToTerminals,
   onOpenInbuiltTerminal
 }: WorkspaceStatusProps) {
+  const { t } = useTranslation(['taskReview', 'common']);
   const { settings } = useSettingsStore();
   const preferredIDE = settings.preferredIDE || 'vscode';
   const preferredTerminal = settings.preferredTerminal || 'system';
-  const [showCommitDialog, setShowCommitDialog] = useState(false);
-  const [isCommitting, setIsCommitting] = useState(false);
-  const [isStashing, setIsStashing] = useState(false);
 
   const handleOpenInIDE = async () => {
     if (!worktreeStatus.worktreePath) return;
@@ -132,60 +131,19 @@ export function WorkspaceStatus({
     }
   };
 
-  const handleCommit = async (commitMessage: string) => {
-    setIsCommitting(true);
-    try {
-      const result = await window.electronAPI.worktreeCommitChanges(taskId, commitMessage);
-      if (result.success && result.data?.success) {
-        setShowCommitDialog(false);
-        // Reload merge preview to update uncommitted changes count
-        onLoadMergePreview();
-      } else {
-        console.error('Failed to commit:', result.error || result.data?.message);
-      }
-    } catch (error) {
-      console.error('Failed to commit changes:', error);
-    } finally {
-      setIsCommitting(false);
-    }
-  };
-
-  const handleStash = async () => {
-    setIsStashing(true);
-    try {
-      const result = await window.electronAPI.worktreeStashChanges(taskId);
-      if (result.success && result.data?.success) {
-        // Reload merge preview to update uncommitted changes count
-        onLoadMergePreview();
-      } else {
-        console.error('Failed to stash:', result.error || result.data?.message);
-      }
-    } catch (error) {
-      console.error('Failed to stash changes:', error);
-    } finally {
-      setIsStashing(false);
-    }
-  };
-
-  // Extract preview data to handle nested structure (WorktreeMergeResult.preview)
-  const previewData = mergePreview?.preview;
-  const activeConflicts = previewData?.conflicts || mergePreview?.conflicts || [];
-  const activeGitConflicts = previewData?.gitConflicts || mergePreview?.gitConflicts;
-  const activeSummary = previewData?.summary || mergePreview?.stats;
-
-  const hasGitConflicts = activeGitConflicts?.hasConflicts;
-  const hasUncommittedChanges = previewData?.uncommittedChanges?.hasChanges;
-  const uncommittedCount = previewData?.uncommittedChanges?.count || 0;
-  const hasAIConflicts = activeConflicts.length > 0;
+  const hasGitConflicts = mergePreview?.gitConflicts?.hasConflicts;
+  const hasUncommittedChanges = mergePreview?.uncommittedChanges?.hasChanges;
+  const uncommittedCount = mergePreview?.uncommittedChanges?.count || 0;
+  const hasAIConflicts = mergePreview && mergePreview.conflicts.length > 0;
 
   // Check if branch needs rebase (main has advanced since spec was created)
   // This requires AI merge even if no explicit file conflicts are detected
-  const needsRebase = activeGitConflicts?.needsRebase;
-  const commitsBehind = activeGitConflicts?.commitsBehind || 0;
+  const needsRebase = mergePreview?.gitConflicts?.needsRebase;
+  const commitsBehind = mergePreview?.gitConflicts?.commitsBehind || 0;
 
   // Path-mapped files that need AI merge due to file renames
-  const pathMappedAIMergeCount = activeSummary?.pathMappedAIMergeCount || 0;
-  const totalRenames = activeGitConflicts?.totalRenames || 0;
+  const pathMappedAIMergeCount = mergePreview?.summary?.pathMappedAIMergeCount || 0;
+  const totalRenames = mergePreview?.gitConflicts?.totalRenames || 0;
 
   // Branch is behind if needsRebase is true and there are commits to catch up on
   // This triggers AI merge for path-mapped files even without explicit conflicts
@@ -293,40 +251,9 @@ export function WorkspaceStatus({
               <p className="text-sm font-medium text-warning">
                 {uncommittedCount} uncommitted {uncommittedCount === 1 ? 'change' : 'changes'} in main project
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5 mb-2">
-                Commit or stash them before staging to avoid conflicts.
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Commit or stash them in your terminal before staging to avoid conflicts.
               </p>
-              <div className="flex gap-2 mt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowCommitDialog(true)}
-                  disabled={isCommitting || isStashing}
-                  className="h-7 px-2 text-xs"
-                >
-                  <GitCommit className="h-3.5 w-3.5 mr-1" />
-                  Commit
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleStash}
-                  disabled={isCommitting || isStashing}
-                  className="h-7 px-2 text-xs"
-                >
-                  {isStashing ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                      Stashing...
-                    </>
-                  ) : (
-                    <>
-                      <Archive className="h-3.5 w-3.5 mr-1" />
-                      Stash
-                    </>
-                  )}
-                </Button>
-              </div>
             </div>
           </div>
         )}
@@ -375,14 +302,14 @@ export function WorkspaceStatus({
                   <CheckCircle className="h-4 w-4 text-success" />
                   <span className="text-sm font-medium text-success">Ready to merge</span>
                   <span className="text-xs text-muted-foreground ml-1">
-                    {activeSummary?.totalFiles || 0} files
+                    {mergePreview.summary.totalFiles} files
                   </span>
                 </>
               ) : (
                 <>
                   <AlertTriangle className="h-4 w-4 text-warning" />
                   <span className="text-sm font-medium text-warning">
-                    {activeConflicts.length} conflict{activeConflicts.length !== 1 ? 's' : ''}
+                    {mergePreview.conflicts.length} conflict{mergePreview.conflicts.length !== 1 ? 's' : ''}
                   </span>
                 </>
               )}
@@ -417,19 +344,19 @@ export function WorkspaceStatus({
         )}
 
         {/* Git Conflicts Details */}
-        {hasGitConflicts && activeGitConflicts && (
+        {hasGitConflicts && mergePreview?.gitConflicts && (
           <div className="text-xs text-muted-foreground pl-6">
-            Main branch has {activeGitConflicts.commitsBehind} new commit{activeGitConflicts.commitsBehind !== 1 ? 's' : ''}.
-            {activeGitConflicts.conflictingFiles.length > 0 && (
+            Main branch has {mergePreview.gitConflicts.commitsBehind} new commit{mergePreview.gitConflicts.commitsBehind !== 1 ? 's' : ''}.
+            {mergePreview.gitConflicts.conflictingFiles.length > 0 && (
               <span className="text-warning">
-                {' '}{activeGitConflicts.conflictingFiles.length} file{activeGitConflicts.conflictingFiles.length !== 1 ? 's' : ''} need merging.
+                {' '}{mergePreview.gitConflicts.conflictingFiles.length} file{mergePreview.gitConflicts.conflictingFiles.length !== 1 ? 's' : ''} need merging.
               </span>
             )}
           </div>
         )}
 
         {/* Branch Behind Details (no explicit conflicts but needs AI merge due to path mappings) */}
-        {!hasGitConflicts && isBranchBehind && activeGitConflicts && (
+        {!hasGitConflicts && isBranchBehind && mergePreview?.gitConflicts && (
           <div className="text-xs text-muted-foreground pl-6">
             Target branch has {commitsBehind} new commit{commitsBehind !== 1 ? 's' : ''} since this build started.
             {hasPathMappedMerges ? (
@@ -513,11 +440,33 @@ export function WorkspaceStatus({
             </Button>
           )}
 
+          {/* Create PR Button */}
+          {onShowPRDialog && (
+            <Button
+              variant="info"
+              onClick={() => onShowPRDialog(true)}
+              disabled={isMerging || isDiscarding || isCreatingPR}
+              className="flex-1"
+            >
+              {isCreatingPR ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {t('taskReview:pr.actions.creating')}
+                </>
+              ) : (
+                <>
+                  <GitPullRequest className="mr-2 h-4 w-4" />
+                  {t('common:buttons.createPR')}
+                </>
+              )}
+            </Button>
+          )}
+
           <Button
             variant="outline"
             size="icon"
             onClick={() => onShowDiscardDialog(true)}
-            disabled={isMerging || isDiscarding}
+            disabled={isMerging || isDiscarding || isCreatingPR}
             className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 hover:border-destructive/30"
             title="Discard build"
           >
@@ -525,15 +474,6 @@ export function WorkspaceStatus({
           </Button>
         </div>
       </div>
-
-      {/* Commit Dialog */}
-      <CommitDialog
-        open={showCommitDialog}
-        taskId={taskId}
-        isCommitting={isCommitting}
-        onOpenChange={setShowCommitDialog}
-        onCommit={handleCommit}
-      />
     </div>
   );
 }

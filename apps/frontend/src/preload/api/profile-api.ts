@@ -90,7 +90,7 @@ export const createProfileAPI = (): ProfileAPI => ({
     if (signal && signal.aborted) {
       return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
     }
-    
+
     // Setup abort listener AFTER checking aborted status to avoid race condition
     if (signal && typeof signal.addEventListener === 'function') {
       try {
@@ -103,7 +103,7 @@ export const createProfileAPI = (): ProfileAPI => ({
     } else if (signal) {
       console.warn('[preload/profile-api] signal provided but addEventListener not available - signal may have been serialized');
     }
-    
+
     return ipcRenderer.invoke(IPC_CHANNELS.PROFILES_TEST_CONNECTION, baseUrl, apiKey, requestId);
   },
 

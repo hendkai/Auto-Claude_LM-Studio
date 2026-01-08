@@ -13,5 +13,6 @@ export { DiscardDialog } from './DiscardDialog';
 export { CommitDialog } from './CommitDialog';
 export { DiffViewDialog } from './DiffViewDialog';
 export { ConflictDetailsDialog } from './ConflictDetailsDialog';
+export { CreatePRDialog } from './CreatePRDialog';
 export { LoadingMessage, NoWorkspaceMessage, StagedInProjectMessage } from './WorkspaceMessages';
 export { getSeverityIcon, getSeverityVariant } from './utils';

@@ -16,7 +16,7 @@
  * - Request cancellation: aborts pending fetch when closed
  */
 import { useState, useEffect, useRef } from 'react';
-import { Loader2, ChevronDown, Search, Check, Info, RefreshCw } from 'lucide-react';
+import { Loader2, ChevronDown, Search, Check, Info } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -119,7 +119,7 @@ export function ModelSearchableSelect({
       if (err instanceof Error && err.name !== 'AbortError') {
         // Check if it's specifically "not supported" or a general error
         if (err.message.includes('does not support model listing') ||
-          err.message.includes('not_supported')) {
+            err.message.includes('not_supported')) {
           setModelDiscoveryNotSupported(true);
         } else {
           // For other errors, also treat as "not supported" for better UX
@@ -239,42 +239,21 @@ export function ModelSearchableSelect({
           className="pr-10"
         />
         {/* Right side indicator: loading spinner, dropdown arrow, or nothing for manual mode */}
-        <div className="absolute right-0 top-0 h-full flex items-center px-2 gap-1">
+        <div className="absolute right-0 top-0 h-full flex items-center px-3">
           {isLoading ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-          ) : (
-            <>
-              {/* Refresh button - always available to retry fetching */}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  fetchModels();
-                  if (!isOpen) setIsOpen(true);
-                }}
-                disabled={disabled || isLoading}
-                className="h-6 w-6 p-0 hover:bg-accent text-muted-foreground"
-                title={t('settings:modelSelect.refresh')}
-              >
-                <RefreshCw className="h-3 w-3" />
-              </Button>
-
-              {!modelDiscoveryNotSupported && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={isOpen ? handleClose : handleOpen}
-                  disabled={disabled}
-                  className="h-6 w-6 p-0 hover:bg-accent"
-                >
-                  <ChevronDown className={cn('h-4 w-4 transition-transform', isOpen && 'rotate-180')} />
-                </Button>
-              )}
-            </>
-          )}
+          ) : !modelDiscoveryNotSupported ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={isOpen ? handleClose : handleOpen}
+              disabled={disabled}
+              className="h-6 w-6 p-0 hover:bg-accent"
+            >
+              <ChevronDown className={cn('h-4 w-4 transition-transform', isOpen && 'rotate-180')} />
+            </Button>
+          ) : null}
         </div>
       </div>
 
