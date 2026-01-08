@@ -162,6 +162,55 @@ export function Worktrees({ projectId }: WorktreesProps) {
     }
   };
 
+  // Handle auto merge and close worktree
+  const handleAutoMergeAndClose = async () => {
+    if (!selectedWorktree) return;
+
+    const task = findTaskForWorktree(selectedWorktree.specName);
+    if (!task) {
+      setError('Task not found for this worktree');
+      return;
+    }
+
+    setIsMerging(true);
+    try {
+      // Step 1: Merge
+      const mergeResult = await window.electronAPI.mergeWorktree(task.id);
+      if (!mergeResult.success || !mergeResult.data?.success) {
+        setMergeResult({
+          success: false,
+          message: mergeResult.error || mergeResult.data?.message || 'Merge failed'
+        });
+        return;
+      }
+
+      // Step 2: Delete worktree after successful merge
+      const deleteResult = await window.electronAPI.discardWorktree(task.id);
+      if (deleteResult.success) {
+        setMergeResult({
+          success: true,
+          message: 'Merged and worktree closed successfully!',
+          merged: true
+        });
+        // Refresh worktrees
+        await loadWorktrees();
+      } else {
+        setMergeResult({
+          success: true, // Merge succeeded, just note that cleanup failed
+          message: `Merged successfully, but failed to close worktree: ${deleteResult.error}`,
+          merged: true
+        });
+      }
+    } catch (err) {
+      setMergeResult({
+        success: false,
+        message: err instanceof Error ? err.message : 'Auto merge and close failed'
+      });
+    } finally {
+      setIsMerging(false);
+    }
+  };
+
   // Handle delete
   const handleDelete = async () => {
     if (!worktreeToDelete) return;
@@ -341,122 +390,240 @@ export function Worktrees({ projectId }: WorktreesProps) {
       {(worktrees.length > 0 || terminalWorktrees.length > 0) && (
         <ScrollArea className="flex-1 -mx-2">
           <div className="space-y-6 px-2">
-            {/* Task Worktrees Section */}
-            {worktrees.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <GitBranch className="h-4 w-4" />
-                  Task Worktrees
-                </h3>
-                {worktrees.map((worktree) => {
-                  const task = findTaskForWorktree(worktree.specName);
-                  return (
-                    <Card key={worktree.specName} className="overflow-hidden">
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1 min-w-0">
-                            <CardTitle className="text-base flex items-center gap-2">
-                              <GitBranch className="h-4 w-4 text-info shrink-0" />
-                              <span className="truncate">{worktree.branch}</span>
-                            </CardTitle>
+            {/* Ready to Merge Section - Tasks with 'done' status */}
+            {worktrees.filter(wt => {
+              const task = findTaskForWorktree(wt.specName);
+              return task?.status === 'done';
+            }).length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-medium text-success flex items-center gap-2">
+                    <Check className="h-4 w-4" />
+                    Ready to Merge (Done)
+                  </h3>
+                  {worktrees.filter(wt => {
+                    const task = findTaskForWorktree(wt.specName);
+                    return task?.status === 'done';
+                  }).map((worktree) => {
+                    const task = findTaskForWorktree(worktree.specName);
+                    return (
+                      <Card key={worktree.specName} className="overflow-hidden border-success/30 bg-success/5">
+                        <CardHeader className="pb-3">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                              <CardTitle className="text-base flex items-center gap-2">
+                                <GitBranch className="h-4 w-4 text-success shrink-0" />
+                                <span className="truncate">{worktree.branch}</span>
+                              </CardTitle>
+                              {task && (
+                                <CardDescription className="mt-1 truncate">
+                                  {task.title}
+                                </CardDescription>
+                              )}
+                            </div>
+                            <Badge variant="default" className="shrink-0 ml-2 bg-success text-success-foreground">
+                              Done
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pt-0">
+                          {/* Stats */}
+                          <div className="flex flex-wrap gap-4 text-sm mb-4">
+                            <div className="flex items-center gap-1.5 text-muted-foreground">
+                              <FileCode className="h-3.5 w-3.5" />
+                              <span>{worktree.filesChanged} files changed</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-muted-foreground">
+                              <ChevronRight className="h-3.5 w-3.5" />
+                              <span>{worktree.commitCount} commits ahead</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-success">
+                              <Plus className="h-3.5 w-3.5" />
+                              <span>{worktree.additions}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-destructive">
+                              <Minus className="h-3.5 w-3.5" />
+                              <span>{worktree.deletions}</span>
+                            </div>
+                          </div>
+
+                          {/* Branch info */}
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4 bg-muted/50 rounded-md p-2">
+                            <span className="font-mono">{worktree.baseBranch}</span>
+                            <ChevronRight className="h-3 w-3" />
+                            <span className="font-mono text-success">{worktree.branch}</span>
+                          </div>
+
+                          {/* Actions - Prominent merge button for done tasks */}
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={() => openMergeDialog(worktree)}
+                              disabled={!task}
+                              className="bg-success hover:bg-success/90"
+                            >
+                              <GitMerge className="h-3.5 w-3.5 mr-1.5" />
+                              Merge to {worktree.baseBranch}
+                            </Button>
                             {task && (
-                              <CardDescription className="mt-1 truncate">
-                                {task.title}
-                              </CardDescription>
+                              <Button
+                                variant="info"
+                                size="sm"
+                                onClick={() => openCreatePRDialog(worktree, task)}
+                              >
+                                <GitPullRequest className="h-3.5 w-3.5 mr-1.5" />
+                                {t('common:buttons.createPR')}
+                              </Button>
                             )}
-                          </div>
-                          <Badge variant="outline" className="shrink-0 ml-2">
-                            {worktree.specName}
-                          </Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pt-0">
-                        {/* Stats */}
-                        <div className="flex flex-wrap gap-4 text-sm mb-4">
-                          <div className="flex items-center gap-1.5 text-muted-foreground">
-                            <FileCode className="h-3.5 w-3.5" />
-                            <span>{worktree.filesChanged} files changed</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 text-muted-foreground">
-                            <ChevronRight className="h-3.5 w-3.5" />
-                            <span>{worktree.commitCount} commits ahead</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 text-success">
-                            <Plus className="h-3.5 w-3.5" />
-                            <span>{worktree.additions}</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 text-destructive">
-                            <Minus className="h-3.5 w-3.5" />
-                            <span>{worktree.deletions}</span>
-                          </div>
-                        </div>
-
-                        {/* Branch info */}
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4 bg-muted/50 rounded-md p-2">
-                          <span className="font-mono">{worktree.baseBranch}</span>
-                          <ChevronRight className="h-3 w-3" />
-                          <span className="font-mono text-info">{worktree.branch}</span>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="default"
-                            size="sm"
-                            onClick={() => openMergeDialog(worktree)}
-                            disabled={!task}
-                          >
-                            <GitMerge className="h-3.5 w-3.5 mr-1.5" />
-                            Merge to {worktree.baseBranch}
-                          </Button>
-                          {task && (
                             <Button
-                              variant="info"
+                              variant="outline"
                               size="sm"
-                              onClick={() => openCreatePRDialog(worktree, task)}
+                              onClick={() => {
+                                navigator.clipboard.writeText(worktree.path);
+                              }}
                             >
-                              <GitPullRequest className="h-3.5 w-3.5 mr-1.5" />
-                              {t('common:buttons.createPR')}
+                              <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
+                              Copy Path
                             </Button>
-                          )}
-                          {task?.status === 'pr_created' && task.metadata?.prUrl && (
                             <Button
-                              variant="info"
+                              variant="outline"
                               size="sm"
-                              onClick={() => window.electronAPI?.openExternal(task.metadata?.prUrl ?? '')}
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => confirmDelete(worktree)}
+                              disabled={!task}
                             >
-                              <GitPullRequest className="h-3.5 w-3.5 mr-1.5" />
-                              {t('common:buttons.openPR')}
+                              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                              Delete
                             </Button>
-                          )}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              // Copy worktree path to clipboard
-                              navigator.clipboard.writeText(worktree.path);
-                            }}
-                          >
-                            <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
-                            Copy Path
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                            onClick={() => confirmDelete(worktree)}
-                            disabled={!task}
-                          >
-                            <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                            Delete
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+
+            {/* In Progress Section - Tasks not yet done */}
+            {worktrees.filter(wt => {
+              const task = findTaskForWorktree(wt.specName);
+              return task?.status !== 'done';
+            }).length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <GitBranch className="h-4 w-4" />
+                    In Progress
+                  </h3>
+                  {worktrees.filter(wt => {
+                    const task = findTaskForWorktree(wt.specName);
+                    return task?.status !== 'done';
+                  }).map((worktree) => {
+                    const task = findTaskForWorktree(worktree.specName);
+                    return (
+                      <Card key={worktree.specName} className="overflow-hidden">
+                        <CardHeader className="pb-3">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                              <CardTitle className="text-base flex items-center gap-2">
+                                <GitBranch className="h-4 w-4 text-info shrink-0" />
+                                <span className="truncate">{worktree.branch}</span>
+                              </CardTitle>
+                              {task && (
+                                <CardDescription className="mt-1 truncate">
+                                  {task.title}
+                                </CardDescription>
+                              )}
+                            </div>
+                            <Badge variant="outline" className="shrink-0 ml-2">
+                              {task?.status || worktree.specName}
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pt-0">
+                          {/* Stats */}
+                          <div className="flex flex-wrap gap-4 text-sm mb-4">
+                            <div className="flex items-center gap-1.5 text-muted-foreground">
+                              <FileCode className="h-3.5 w-3.5" />
+                              <span>{worktree.filesChanged} files changed</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-muted-foreground">
+                              <ChevronRight className="h-3.5 w-3.5" />
+                              <span>{worktree.commitCount} commits ahead</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-success">
+                              <Plus className="h-3.5 w-3.5" />
+                              <span>{worktree.additions}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-destructive">
+                              <Minus className="h-3.5 w-3.5" />
+                              <span>{worktree.deletions}</span>
+                            </div>
+                          </div>
+
+                          {/* Branch info */}
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4 bg-muted/50 rounded-md p-2">
+                            <span className="font-mono">{worktree.baseBranch}</span>
+                            <ChevronRight className="h-3 w-3" />
+                            <span className="font-mono text-info">{worktree.branch}</span>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={() => openMergeDialog(worktree)}
+                              disabled={!task}
+                            >
+                              <GitMerge className="h-3.5 w-3.5 mr-1.5" />
+                              Merge to {worktree.baseBranch}
+                            </Button>
+                            {task && (
+                              <Button
+                                variant="info"
+                                size="sm"
+                                onClick={() => openCreatePRDialog(worktree, task)}
+                              >
+                                <GitPullRequest className="h-3.5 w-3.5 mr-1.5" />
+                                {t('common:buttons.createPR')}
+                              </Button>
+                            )}
+                            {task?.status === 'pr_created' && task.metadata?.prUrl && (
+                              <Button
+                                variant="info"
+                                size="sm"
+                                onClick={() => window.electronAPI?.openExternal(task.metadata?.prUrl ?? '')}
+                              >
+                                <GitPullRequest className="h-3.5 w-3.5 mr-1.5" />
+                                {t('common:buttons.openPR')}
+                              </Button>
+                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                navigator.clipboard.writeText(worktree.path);
+                              }}
+                            >
+                              <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
+                              Copy Path
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => confirmDelete(worktree)}
+                              disabled={!task}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                              Delete
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
 
             {/* Terminal Worktrees Section */}
             {terminalWorktrees.length > 0 && (
@@ -577,11 +744,10 @@ export function Worktrees({ projectId }: WorktreesProps) {
 
           {mergeResult && (
             <div className="py-4">
-              <div className={`rounded-lg p-4 text-sm ${
-                mergeResult.success
-                  ? 'bg-success/10 border border-success/30'
-                  : 'bg-destructive/10 border border-destructive/30'
-              }`}>
+              <div className={`rounded-lg p-4 text-sm ${mergeResult.success
+                ? 'bg-success/10 border border-success/30'
+                : 'bg-destructive/10 border border-destructive/30'
+                }`}>
                 <div className="flex items-start gap-2">
                   {mergeResult.success ? (
                     <Check className="h-4 w-4 text-success mt-0.5" />
@@ -609,7 +775,7 @@ export function Worktrees({ projectId }: WorktreesProps) {
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="flex gap-2 sm:gap-2">
             <Button
               variant="outline"
               onClick={() => {
@@ -620,22 +786,42 @@ export function Worktrees({ projectId }: WorktreesProps) {
               {mergeResult ? 'Close' : 'Cancel'}
             </Button>
             {!mergeResult && (
-              <Button
-                onClick={handleMerge}
-                disabled={isMerging}
-              >
-                {isMerging ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Merging...
-                  </>
-                ) : (
-                  <>
-                    <GitMerge className="h-4 w-4 mr-2" />
-                    Merge
-                  </>
-                )}
-              </Button>
+              <>
+                <Button
+                  onClick={handleMerge}
+                  disabled={isMerging}
+                  variant="outline"
+                >
+                  {isMerging ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Merging...
+                    </>
+                  ) : (
+                    <>
+                      <GitMerge className="h-4 w-4 mr-2" />
+                      Merge Only
+                    </>
+                  )}
+                </Button>
+                <Button
+                  onClick={handleAutoMergeAndClose}
+                  disabled={isMerging}
+                  variant="default"
+                >
+                  {isMerging ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <GitMerge className="h-4 w-4 mr-2" />
+                      Merge & Close Worktree
+                    </>
+                  )}
+                </Button>
+              </>
             )}
           </DialogFooter>
         </DialogContent>
