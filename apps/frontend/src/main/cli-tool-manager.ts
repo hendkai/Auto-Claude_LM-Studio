@@ -20,33 +20,17 @@
  * - Graceful fallbacks when tools not found
  */
 
-import { execFileSync, execFile } from 'child_process';
+import { execFileSync, execFile, execSync, exec } from 'child_process';
 import { existsSync, readdirSync, promises as fsPromises } from 'fs';
 import path from 'path';
 import os from 'os';
 import { promisify } from 'util';
 import { app } from 'electron';
-import { findExecutable, findExecutableAsync, getAugmentedEnv, getAugmentedEnvAsync } from './env-utils';
+import { findExecutable, findExecutableAsync, getAugmentedEnv, getAugmentedEnvAsync, shouldUseShell, existsAsync } from './env-utils';
+import type { ToolDetectionResult } from '../shared/types';
 
 const execFileAsync = promisify(execFile);
-
-/**
- * Check if a path exists asynchronously (non-blocking)
- *
- * Uses fs.promises.access which is non-blocking, unlike fs.existsSync.
- *
- * @param filePath - The path to check
- * @returns Promise resolving to true if path exists, false otherwise
- */
-async function existsAsync(filePath: string): Promise<boolean> {
-  try {
-    await fsPromises.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-import type { ToolDetectionResult } from '../shared/types';
+const execAsync = promisify(exec);
 import { findHomebrewPython as findHomebrewPythonUtil } from './utils/homebrew-python';
 import {
   getWindowsExecutablePaths,
@@ -54,8 +38,8 @@ import {
   WINDOWS_GIT_PATHS,
   findWindowsExecutableViaWhere,
   findWindowsExecutableViaWhereAsync,
+  isSecurePath,
 } from './utils/windows-paths';
-
 
 /**
  * Supported CLI tools managed by this system
@@ -169,16 +153,16 @@ export function getClaudeDetectionPaths(homeDir: string): ClaudeDetectionPaths {
 
   const platformPaths = process.platform === 'win32'
     ? [
-      path.join(homeDir, 'AppData', 'Local', 'Programs', 'claude', 'claude.exe'),
-      path.join(homeDir, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
-      path.join(homeDir, '.local', 'bin', 'claude.exe'),
-      'C:\\Program Files\\Claude\\claude.exe',
-      'C:\\Program Files (x86)\\Claude\\claude.exe',
-    ]
+        path.join(homeDir, 'AppData', 'Local', 'Programs', 'claude', 'claude.exe'),
+        path.join(homeDir, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
+        path.join(homeDir, '.local', 'bin', 'claude.exe'),
+        'C:\\Program Files\\Claude\\claude.exe',
+        'C:\\Program Files (x86)\\Claude\\claude.exe',
+      ]
     : [
-      path.join(homeDir, '.local', 'bin', 'claude'),
-      path.join(homeDir, 'bin', 'claude'),
-    ];
+        path.join(homeDir, '.local', 'bin', 'claude'),
+        path.join(homeDir, 'bin', 'claude'),
+      ];
 
   const nvmVersionsDir = path.join(homeDir, '.nvm', 'versions', 'node');
 
@@ -706,7 +690,9 @@ class CLIToolManager {
    * 1. User configuration (if valid for current platform)
    * 2. Homebrew claude (macOS)
    * 3. System PATH
-   * 4. Windows/macOS/Linux standard locations
+   * 4. Windows where.exe (Windows only - finds executables via PATH + Registry)
+   * 5. NVM paths (Unix only - checks Node.js version managers)
+   * 6. Platform-specific standard locations
    *
    * @returns Detection result for Claude CLI
    */
@@ -719,6 +705,10 @@ class CLIToolManager {
       if (isWrongPlatformPath(this.userConfig.claudePath)) {
         console.warn(
           `[Claude CLI] User-configured path is from different platform, ignoring: ${this.userConfig.claudePath}`
+        );
+      } else if (process.platform === 'win32' && !isSecurePath(this.userConfig.claudePath)) {
+        console.warn(
+          `[Claude CLI] User-configured path failed security validation, ignoring: ${this.userConfig.claudePath}`
         );
       } else {
         const validation = this.validateClaude(this.userConfig.claudePath);
@@ -749,7 +739,17 @@ class CLIToolManager {
       if (result) return result;
     }
 
-    // 4. NVM paths (Unix only) - check before platform paths for better Node.js integration
+    // 4. Windows where.exe detection (Windows only - most reliable for custom installs)
+    if (process.platform === 'win32') {
+      const whereClaudePath = findWindowsExecutableViaWhere('claude', '[Claude CLI]');
+      if (whereClaudePath) {
+        const validation = this.validateClaude(whereClaudePath);
+        const result = buildClaudeDetectionResult(whereClaudePath, validation, 'system-path', 'Using Windows Claude CLI');
+        if (result) return result;
+      }
+    }
+
+    // 5. NVM paths (Unix only) - check before platform paths for better Node.js integration
     if (process.platform !== 'win32') {
       try {
         if (existsSync(paths.nvmVersionsDir)) {
@@ -770,7 +770,7 @@ class CLIToolManager {
       }
     }
 
-    // 5. Platform-specific standard locations
+    // 6. Platform-specific standard locations
     for (const claudePath of paths.platformPaths) {
       if (existsSync(claudePath)) {
         const validation = this.validateClaude(claudePath);
@@ -779,7 +779,7 @@ class CLIToolManager {
       }
     }
 
-    // 6. Not found
+    // 7. Not found
     return {
       found: false,
       source: 'fallback',
@@ -916,21 +916,30 @@ class CLIToolManager {
    */
   private validateClaude(claudeCmd: string): ToolValidation {
     try {
-      // On Windows, .cmd files need shell: true to execute properly.
-      // SECURITY NOTE: shell: true is safe here because:
-      // 1. claudeCmd comes from internal path detection (user config or known system paths)
-      // 2. Only '--version' is passed as an argument (no user input)
-      // If claudeCmd origin ever changes to accept user input, use escapeShellArgWindows.
-      const needsShell = process.platform === 'win32' &&
-        (claudeCmd.endsWith('.cmd') || claudeCmd.endsWith('.bat'));
+      const needsShell = shouldUseShell(claudeCmd);
 
-      const version = execFileSync(claudeCmd, ['--version'], {
-        encoding: 'utf-8',
-        timeout: 5000,
-        windowsHide: true,
-        shell: needsShell,
-        env: getAugmentedEnv(),
-      }).trim();
+      let version: string;
+
+      if (needsShell) {
+        // For .cmd/.bat files on Windows, use execSync with quoted path
+        // execFileSync doesn't handle spaces in .cmd paths correctly even with shell:true
+        const quotedCmd = `"${claudeCmd}"`;
+        version = execSync(`${quotedCmd} --version`, {
+          encoding: 'utf-8',
+          timeout: 5000,
+          windowsHide: true,
+          env: getAugmentedEnv(),
+        }).trim();
+      } else {
+        // For .exe files and non-Windows, use execFileSync
+        version = execFileSync(claudeCmd, ['--version'], {
+          encoding: 'utf-8',
+          timeout: 5000,
+          windowsHide: true,
+          shell: false,
+          env: getAugmentedEnv(),
+        }).trim();
+      }
 
       // Claude CLI version output format: "claude-code version X.Y.Z" or similar
       const match = version.match(/(\d+\.\d+\.\d+)/);
@@ -1016,13 +1025,604 @@ class CLIToolManager {
     }
   }
 
-  /*
-  * (Removed duplicate implementations)
-  */
-  /*
-   * (Removed duplicate implementations of async validation and detection methods)
-   * The canonical implementations are further down in the file.
+  /**
+   * Validate Claude CLI asynchronously (non-blocking)
+   *
+   * @param claudeCmd - The Claude CLI command to validate
+   * @returns Promise resolving to validation result
    */
+  private async validateClaudeAsync(claudeCmd: string): Promise<ToolValidation> {
+    try {
+      const needsShell = shouldUseShell(claudeCmd);
+
+      let stdout: string;
+
+      if (needsShell) {
+        // For .cmd/.bat files on Windows, use exec with quoted path
+        const quotedCmd = `"${claudeCmd}"`;
+        const result = await execAsync(`${quotedCmd} --version`, {
+          encoding: 'utf-8',
+          timeout: 5000,
+          windowsHide: true,
+          env: await getAugmentedEnvAsync(),
+        });
+        stdout = result.stdout;
+      } else {
+        // For .exe files and non-Windows, use execFileAsync
+        const result = await execFileAsync(claudeCmd, ['--version'], {
+          encoding: 'utf-8',
+          timeout: 5000,
+          windowsHide: true,
+          shell: false,
+          env: await getAugmentedEnvAsync(),
+        });
+        stdout = result.stdout;
+      }
+
+      const version = stdout.trim();
+      const match = version.match(/(\d+\.\d+\.\d+)/);
+      const versionStr = match ? match[1] : version.split('\n')[0];
+
+      return {
+        valid: true,
+        version: versionStr,
+        message: `Claude CLI ${versionStr} is available`,
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        message: `Failed to validate Claude CLI: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+
+  /**
+   * Validate Python version asynchronously (non-blocking)
+   *
+   * @param pythonCmd - The Python command to validate
+   * @returns Promise resolving to validation result
+   */
+  private async validatePythonAsync(pythonCmd: string): Promise<ToolValidation> {
+    const MINIMUM_VERSION = '3.10.0';
+
+    try {
+      const parts = pythonCmd.split(' ');
+      const cmd = parts[0];
+      const args = [...parts.slice(1), '--version'];
+
+      const { stdout } = await execFileAsync(cmd, args, {
+        encoding: 'utf-8',
+        timeout: 5000,
+        windowsHide: true,
+        env: await getAugmentedEnvAsync(),
+      });
+
+      const version = stdout.trim();
+      const match = version.match(/Python (\d+\.\d+\.\d+)/);
+      if (!match) {
+        return {
+          valid: false,
+          message: 'Unable to detect Python version',
+        };
+      }
+
+      const versionStr = match[1];
+      const [major, minor] = versionStr.split('.').map(Number);
+      const [reqMajor, reqMinor] = MINIMUM_VERSION.split('.').map(Number);
+
+      const meetsRequirement =
+        major > reqMajor || (major === reqMajor && minor >= reqMinor);
+
+      if (!meetsRequirement) {
+        return {
+          valid: false,
+          version: versionStr,
+          message: `Python ${versionStr} is too old. Requires ${MINIMUM_VERSION}+`,
+        };
+      }
+
+      return {
+        valid: true,
+        version: versionStr,
+        message: `Python ${versionStr} meets requirements`,
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        message: `Failed to validate Python: ${error}`,
+      };
+    }
+  }
+
+  /**
+   * Validate Git asynchronously (non-blocking)
+   *
+   * @param gitCmd - The Git command to validate
+   * @returns Promise resolving to validation result
+   */
+  private async validateGitAsync(gitCmd: string): Promise<ToolValidation> {
+    try {
+      const { stdout } = await execFileAsync(gitCmd, ['--version'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        windowsHide: true,
+        env: await getAugmentedEnvAsync(),
+      });
+
+      const version = stdout.trim();
+      const match = version.match(/git version (\d+\.\d+\.\d+)/);
+      const versionStr = match ? match[1] : version;
+
+      return {
+        valid: true,
+        version: versionStr,
+        message: `Git ${versionStr} is available`,
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        message: `Failed to validate Git: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+
+  /**
+   * Validate GitHub CLI asynchronously (non-blocking)
+   *
+   * @param ghCmd - The GitHub CLI command to validate
+   * @returns Promise resolving to validation result
+   */
+  private async validateGitHubCLIAsync(ghCmd: string): Promise<ToolValidation> {
+    try {
+      const { stdout } = await execFileAsync(ghCmd, ['--version'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        windowsHide: true,
+        env: await getAugmentedEnvAsync(),
+      });
+
+      const version = stdout.trim();
+      const match = version.match(/gh version (\d+\.\d+\.\d+)/);
+      const versionStr = match ? match[1] : version.split('\n')[0];
+
+      return {
+        valid: true,
+        version: versionStr,
+        message: `GitHub CLI ${versionStr} is available`,
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        message: `Failed to validate GitHub CLI: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+
+  /**
+   * Detect Claude CLI asynchronously (non-blocking)
+   *
+   * Priority order:
+   * 1. User configuration (if valid for current platform)
+   * 2. Homebrew claude (macOS)
+   * 3. System PATH
+   * 4. Windows where.exe (Windows only - finds executables via PATH + Registry)
+   * 5. NVM paths (Unix only - checks Node.js version managers)
+   * 6. Platform-specific standard locations
+   *
+   * @returns Promise resolving to detection result
+   */
+  private async detectClaudeAsync(): Promise<ToolDetectionResult> {
+    const homeDir = os.homedir();
+    const paths = getClaudeDetectionPaths(homeDir);
+
+    // 1. User configuration
+    if (this.userConfig.claudePath) {
+      if (isWrongPlatformPath(this.userConfig.claudePath)) {
+        console.warn(
+          `[Claude CLI] User-configured path is from different platform, ignoring: ${this.userConfig.claudePath}`
+        );
+      } else if (process.platform === 'win32' && !isSecurePath(this.userConfig.claudePath)) {
+        console.warn(
+          `[Claude CLI] User-configured path failed security validation, ignoring: ${this.userConfig.claudePath}`
+        );
+      } else {
+        const validation = await this.validateClaudeAsync(this.userConfig.claudePath);
+        const result = buildClaudeDetectionResult(
+          this.userConfig.claudePath, validation, 'user-config', 'Using user-configured Claude CLI'
+        );
+        if (result) return result;
+        console.warn(`[Claude CLI] User-configured path invalid: ${validation.message}`);
+      }
+    }
+
+    // 2. Homebrew (macOS)
+    if (process.platform === 'darwin') {
+      for (const claudePath of paths.homebrewPaths) {
+        if (await existsAsync(claudePath)) {
+          const validation = await this.validateClaudeAsync(claudePath);
+          const result = buildClaudeDetectionResult(claudePath, validation, 'homebrew', 'Using Homebrew Claude CLI');
+          if (result) return result;
+        }
+      }
+    }
+
+    // 3. System PATH (augmented) - using async findExecutable
+    const systemClaudePath = await findExecutableAsync('claude');
+    if (systemClaudePath) {
+      const validation = await this.validateClaudeAsync(systemClaudePath);
+      const result = buildClaudeDetectionResult(systemClaudePath, validation, 'system-path', 'Using system Claude CLI');
+      if (result) return result;
+    }
+
+    // 4. Windows where.exe detection (async, non-blocking)
+    if (process.platform === 'win32') {
+      const whereClaudePath = await findWindowsExecutableViaWhereAsync('claude', '[Claude CLI]');
+      if (whereClaudePath) {
+        const validation = await this.validateClaudeAsync(whereClaudePath);
+        const result = buildClaudeDetectionResult(whereClaudePath, validation, 'system-path', 'Using Windows Claude CLI');
+        if (result) return result;
+      }
+    }
+
+    // 5. NVM paths (Unix only) - check before platform paths for better Node.js integration
+    if (process.platform !== 'win32') {
+      try {
+        if (await existsAsync(paths.nvmVersionsDir)) {
+          const nodeVersions = await fsPromises.readdir(paths.nvmVersionsDir, { withFileTypes: true });
+          const versionNames = sortNvmVersionDirs(nodeVersions);
+
+          for (const versionName of versionNames) {
+            const nvmClaudePath = path.join(paths.nvmVersionsDir, versionName, 'bin', 'claude');
+            if (await existsAsync(nvmClaudePath)) {
+              const validation = await this.validateClaudeAsync(nvmClaudePath);
+              const result = buildClaudeDetectionResult(nvmClaudePath, validation, 'nvm', 'Using NVM Claude CLI');
+              if (result) return result;
+            }
+          }
+        }
+      } catch (error) {
+        console.warn(`[Claude CLI] Unable to read NVM directory: ${error}`);
+      }
+    }
+
+    // 6. Platform-specific standard locations
+    for (const claudePath of paths.platformPaths) {
+      if (await existsAsync(claudePath)) {
+        const validation = await this.validateClaudeAsync(claudePath);
+        const result = buildClaudeDetectionResult(claudePath, validation, 'system-path', 'Using Claude CLI');
+        if (result) return result;
+      }
+    }
+
+    // 7. Not found
+    return {
+      found: false,
+      source: 'fallback',
+      message: 'Claude CLI not found. Install from https://claude.ai/download',
+    };
+  }
+
+  /**
+   * Detect Python asynchronously (non-blocking)
+   *
+   * Same detection logic as detectPython but uses async validation.
+   *
+   * @returns Promise resolving to detection result
+   */
+  private async detectPythonAsync(): Promise<ToolDetectionResult> {
+    const MINIMUM_VERSION = '3.10.0';
+
+    // 1. User configuration
+    if (this.userConfig.pythonPath) {
+      if (isWrongPlatformPath(this.userConfig.pythonPath)) {
+        console.warn(
+          `[Python] User-configured path is from different platform, ignoring: ${this.userConfig.pythonPath}`
+        );
+      } else {
+        const validation = await this.validatePythonAsync(this.userConfig.pythonPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: this.userConfig.pythonPath,
+            version: validation.version,
+            source: 'user-config',
+            message: `Using user-configured Python: ${this.userConfig.pythonPath}`,
+          };
+        }
+        console.warn(`[Python] User-configured path invalid: ${validation.message}`);
+      }
+    }
+
+    // 2. Bundled Python (packaged apps only)
+    if (app.isPackaged) {
+      const bundledPath = this.getBundledPythonPath();
+      if (bundledPath) {
+        const validation = await this.validatePythonAsync(bundledPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: bundledPath,
+            version: validation.version,
+            source: 'bundled',
+            message: `Using bundled Python: ${bundledPath}`,
+          };
+        }
+      }
+    }
+
+    // 3. Homebrew Python (macOS) - simplified async version
+    if (process.platform === 'darwin') {
+      const homebrewPaths = [
+        '/opt/homebrew/bin/python3',
+        '/opt/homebrew/bin/python3.12',
+        '/opt/homebrew/bin/python3.11',
+        '/opt/homebrew/bin/python3.10',
+        '/usr/local/bin/python3',
+      ];
+      for (const pythonPath of homebrewPaths) {
+        if (await existsAsync(pythonPath)) {
+          const validation = await this.validatePythonAsync(pythonPath);
+          if (validation.valid) {
+            return {
+              found: true,
+              path: pythonPath,
+              version: validation.version,
+              source: 'homebrew',
+              message: `Using Homebrew Python: ${pythonPath}`,
+            };
+          }
+        }
+      }
+    }
+
+    // 4. System PATH (augmented)
+    const candidates =
+      process.platform === 'win32'
+        ? ['py -3', 'python', 'python3', 'py']
+        : ['python3', 'python'];
+
+    for (const cmd of candidates) {
+      if (cmd.startsWith('py ')) {
+        const validation = await this.validatePythonAsync(cmd);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: cmd,
+            version: validation.version,
+            source: 'system-path',
+            message: `Using system Python: ${cmd}`,
+          };
+        }
+      } else {
+        const pythonPath = await findExecutableAsync(cmd);
+        if (pythonPath) {
+          const validation = await this.validatePythonAsync(pythonPath);
+          if (validation.valid) {
+            return {
+              found: true,
+              path: pythonPath,
+              version: validation.version,
+              source: 'system-path',
+              message: `Using system Python: ${pythonPath}`,
+            };
+          }
+        }
+      }
+    }
+
+    // 5. Not found
+    return {
+      found: false,
+      source: 'fallback',
+      message:
+        `Python ${MINIMUM_VERSION}+ not found. ` +
+        'Please install Python or configure in Settings.',
+    };
+  }
+
+  /**
+   * Detect Git asynchronously (non-blocking)
+   *
+   * Same detection logic as detectGit but uses async validation.
+   *
+   * @returns Promise resolving to detection result
+   */
+  private async detectGitAsync(): Promise<ToolDetectionResult> {
+    // 1. User configuration
+    if (this.userConfig.gitPath) {
+      if (isWrongPlatformPath(this.userConfig.gitPath)) {
+        console.warn(
+          `[Git] User-configured path is from different platform, ignoring: ${this.userConfig.gitPath}`
+        );
+      } else {
+        const validation = await this.validateGitAsync(this.userConfig.gitPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: this.userConfig.gitPath,
+            version: validation.version,
+            source: 'user-config',
+            message: `Using user-configured Git: ${this.userConfig.gitPath}`,
+          };
+        }
+        console.warn(`[Git] User-configured path invalid: ${validation.message}`);
+      }
+    }
+
+    // 2. Homebrew (macOS)
+    if (process.platform === 'darwin') {
+      const homebrewPaths = [
+        '/opt/homebrew/bin/git',
+        '/usr/local/bin/git',
+      ];
+
+      for (const gitPath of homebrewPaths) {
+        if (await existsAsync(gitPath)) {
+          const validation = await this.validateGitAsync(gitPath);
+          if (validation.valid) {
+            return {
+              found: true,
+              path: gitPath,
+              version: validation.version,
+              source: 'homebrew',
+              message: `Using Homebrew Git: ${gitPath}`,
+            };
+          }
+        }
+      }
+    }
+
+    // 3. System PATH (augmented)
+    const gitPath = await findExecutableAsync('git');
+    if (gitPath) {
+      const validation = await this.validateGitAsync(gitPath);
+      if (validation.valid) {
+        return {
+          found: true,
+          path: gitPath,
+          version: validation.version,
+          source: 'system-path',
+          message: `Using system Git: ${gitPath}`,
+        };
+      }
+    }
+
+    // 4. Windows-specific detection (async to avoid blocking main process)
+    if (process.platform === 'win32') {
+      const whereGitPath = await findWindowsExecutableViaWhereAsync('git', '[Git]');
+      if (whereGitPath) {
+        const validation = await this.validateGitAsync(whereGitPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: whereGitPath,
+            version: validation.version,
+            source: 'system-path',
+            message: `Using Windows Git: ${whereGitPath}`,
+          };
+        }
+      }
+
+      const windowsPaths = await getWindowsExecutablePathsAsync(WINDOWS_GIT_PATHS, '[Git]');
+      for (const winGitPath of windowsPaths) {
+        const validation = await this.validateGitAsync(winGitPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: winGitPath,
+            version: validation.version,
+            source: 'system-path',
+            message: `Using Windows Git: ${winGitPath}`,
+          };
+        }
+      }
+    }
+
+    // 5. Not found
+    return {
+      found: false,
+      source: 'fallback',
+      message: 'Git not found in standard locations. Using fallback "git".',
+    };
+  }
+
+  /**
+   * Detect GitHub CLI asynchronously (non-blocking)
+   *
+   * Same detection logic as detectGitHubCLI but uses async validation.
+   *
+   * @returns Promise resolving to detection result
+   */
+  private async detectGitHubCLIAsync(): Promise<ToolDetectionResult> {
+    // 1. User configuration
+    if (this.userConfig.githubCLIPath) {
+      if (isWrongPlatformPath(this.userConfig.githubCLIPath)) {
+        console.warn(
+          `[GitHub CLI] User-configured path is from different platform, ignoring: ${this.userConfig.githubCLIPath}`
+        );
+      } else {
+        const validation = await this.validateGitHubCLIAsync(this.userConfig.githubCLIPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: this.userConfig.githubCLIPath,
+            version: validation.version,
+            source: 'user-config',
+            message: `Using user-configured GitHub CLI: ${this.userConfig.githubCLIPath}`,
+          };
+        }
+        console.warn(`[GitHub CLI] User-configured path invalid: ${validation.message}`);
+      }
+    }
+
+    // 2. Homebrew (macOS)
+    if (process.platform === 'darwin') {
+      const homebrewPaths = [
+        '/opt/homebrew/bin/gh',
+        '/usr/local/bin/gh',
+      ];
+
+      for (const ghPath of homebrewPaths) {
+        if (await existsAsync(ghPath)) {
+          const validation = await this.validateGitHubCLIAsync(ghPath);
+          if (validation.valid) {
+            return {
+              found: true,
+              path: ghPath,
+              version: validation.version,
+              source: 'homebrew',
+              message: `Using Homebrew GitHub CLI: ${ghPath}`,
+            };
+          }
+        }
+      }
+    }
+
+    // 3. System PATH (augmented)
+    const ghPath = await findExecutableAsync('gh');
+    if (ghPath) {
+      const validation = await this.validateGitHubCLIAsync(ghPath);
+      if (validation.valid) {
+        return {
+          found: true,
+          path: ghPath,
+          version: validation.version,
+          source: 'system-path',
+          message: `Using system GitHub CLI: ${ghPath}`,
+        };
+      }
+    }
+
+    // 4. Windows Program Files
+    if (process.platform === 'win32') {
+      const windowsPaths = [
+        'C:\\Program Files\\GitHub CLI\\gh.exe',
+        'C:\\Program Files (x86)\\GitHub CLI\\gh.exe',
+      ];
+
+      for (const winGhPath of windowsPaths) {
+        if (await existsAsync(winGhPath)) {
+          const validation = await this.validateGitHubCLIAsync(winGhPath);
+          if (validation.valid) {
+            return {
+              found: true,
+              path: winGhPath,
+              version: validation.version,
+              source: 'system-path',
+              message: `Using Windows GitHub CLI: ${winGhPath}`,
+            };
+          }
+        }
+      }
+    }
+
+    // 5. Not found
+    return {
+      found: false,
+      source: 'fallback',
+      message: 'GitHub CLI (gh) not found. Install from https://cli.github.com',
+    };
+  }
 
   /**
    * Get bundled Python path for packaged apps
@@ -1082,535 +1682,6 @@ class CLIToolManager {
    */
   getToolInfo(tool: CLITool): ToolDetectionResult {
     return this.detectToolPath(tool);
-  }
-
-  /**
-   * Get tool detection info asynchronously (non-blocking)
-   *
-   * Currently only implements detailed async detection for 'claude'.
-   * Other tools fall back to sync detection (wrapped in promise).
-   *
-   * @param tool - The tool to get detection info for
-   * @returns Promise resolving to Detection result
-   */
-  async getToolInfoAsync(tool: CLITool): Promise<ToolDetectionResult> {
-    switch (tool) {
-      case 'python':
-        return this.detectPythonAsync();
-      case 'git':
-        return this.detectGitAsync();
-      case 'gh':
-        return this.detectGitHubCLIAsync();
-      case 'claude':
-        return this.detectClaudeAsync();
-      default:
-        // Fallback for any future tools
-        return Promise.resolve(this.detectToolPath(tool));
-    }
-  }
-
-  /**
-   * Detect Claude CLI asynchronously with multi-level priority
-   */
-  private async detectClaudeAsync(): Promise<ToolDetectionResult> {
-    const homeDir = os.homedir();
-    const paths = getClaudeDetectionPaths(homeDir);
-
-    // 1. User configuration
-    if (this.userConfig.claudePath) {
-      if (isWrongPlatformPath(this.userConfig.claudePath)) {
-        console.warn(
-          `[Claude CLI] User-configured path is from different platform, ignoring: ${this.userConfig.claudePath}`
-        );
-      } else {
-        const validation = await this.validateClaudeAsync(this.userConfig.claudePath);
-        const result = buildClaudeDetectionResult(
-          this.userConfig.claudePath, validation, 'user-config', 'Using user-configured Claude CLI'
-        );
-        if (result) return result;
-        console.warn(`[Claude CLI] User-configured path invalid: ${validation.message}`);
-      }
-    }
-
-    // 2. Homebrew (macOS)
-    if (process.platform === 'darwin') {
-      for (const claudePath of paths.homebrewPaths) {
-        if (await existsAsync(claudePath)) {
-          const validation = await this.validateClaudeAsync(claudePath);
-          const result = buildClaudeDetectionResult(claudePath, validation, 'homebrew', 'Using Homebrew Claude CLI');
-          if (result) return result;
-        }
-      }
-    }
-
-    // 3. System PATH (augmented) - using async findExecutable
-    const systemClaudePath = await findExecutableAsync('claude');
-    if (systemClaudePath) {
-      const validation = await this.validateClaudeAsync(systemClaudePath);
-      const result = buildClaudeDetectionResult(systemClaudePath, validation, 'system-path', 'Using system Claude CLI');
-      if (result) return result;
-    }
-
-    // 4. NVM paths (Unix only) - check before platform paths for better Node.js integration
-    if (process.platform !== 'win32') {
-      try {
-        if (await existsAsync(paths.nvmVersionsDir)) {
-          const nodeVersions = await fsPromises.readdir(paths.nvmVersionsDir, { withFileTypes: true });
-          const versionNames = sortNvmVersionDirs(nodeVersions);
-
-          for (const versionName of versionNames) {
-            const nvmClaudePath = path.join(paths.nvmVersionsDir, versionName, 'bin', 'claude');
-            if (await existsAsync(nvmClaudePath)) {
-              const validation = await this.validateClaudeAsync(nvmClaudePath);
-              const result = buildClaudeDetectionResult(nvmClaudePath, validation, 'nvm', 'Using NVM Claude CLI');
-              if (result) return result;
-            }
-          }
-        }
-      } catch (error) {
-        console.warn(`[Claude CLI] Unable to read NVM directory: ${error}`);
-      }
-    }
-
-    // 5. Platform-specific standard locations
-    for (const claudePath of paths.platformPaths) {
-      if (await existsAsync(claudePath)) {
-        const validation = await this.validateClaudeAsync(claudePath);
-        const result = buildClaudeDetectionResult(claudePath, validation, 'system-path', 'Using Claude CLI');
-        if (result) return result;
-      }
-    }
-
-    // 6. Not found
-    return {
-      found: false,
-      source: 'fallback',
-      message: 'Claude CLI not found. Install from https://claude.ai/download',
-    };
-  }
-
-  /**
-   * Validate Claude CLI availability and version asynchronously
-   */
-  private async validateClaudeAsync(claudeCmd: string): Promise<ToolValidation> {
-    try {
-      const needsShell = process.platform === 'win32' &&
-        (claudeCmd.endsWith('.cmd') || claudeCmd.endsWith('.bat'));
-
-      const { stdout } = await execFileAsync(claudeCmd, ['--version'], {
-        encoding: 'utf-8',
-        timeout: 5000,
-        windowsHide: true,
-        shell: needsShell,
-      });
-
-      const version = stdout.trim();
-      const match = version.match(/(\d+\.\d+\.\d+)/);
-      const versionStr = match ? match[1] : version.split('\n')[0];
-
-      return {
-        valid: true,
-        version: versionStr,
-        message: `Claude CLI ${versionStr} is available`,
-      };
-    } catch (error) {
-      return {
-        valid: false,
-        message: `Failed to validate Claude CLI: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
-  }
-
-  /**
-   * Detect Python asynchronously with multi-level priority
-   */
-  private async detectPythonAsync(): Promise<ToolDetectionResult> {
-    const MINIMUM_VERSION = '3.10.0';
-
-    // 1. User configuration
-    if (this.userConfig.pythonPath) {
-      if (isWrongPlatformPath(this.userConfig.pythonPath)) {
-        console.warn(
-          `[Python] User-configured path is from different platform, ignoring: ${this.userConfig.pythonPath}`
-        );
-      } else {
-        const validation = await this.validatePythonAsync(this.userConfig.pythonPath);
-        if (validation.valid) {
-          return {
-            found: true,
-            path: this.userConfig.pythonPath,
-            version: validation.version,
-            source: 'user-config',
-            message: `Using user-configured Python: ${this.userConfig.pythonPath}`,
-          };
-        }
-        console.warn(
-          `[Python] User-configured path invalid: ${validation.message}`
-        );
-      }
-    }
-
-    // 2. Bundled Python (packaged apps only)
-    if (app.isPackaged) {
-      const bundledPath = this.getBundledPythonPath();
-      if (bundledPath) {
-        const validation = await this.validatePythonAsync(bundledPath);
-        if (validation.valid) {
-          return {
-            found: true,
-            path: bundledPath,
-            version: validation.version,
-            source: 'bundled',
-            message: `Using bundled Python: ${bundledPath}`,
-          };
-        }
-      }
-    }
-
-    // 3. Homebrew Python (macOS)
-    if (process.platform === 'darwin') {
-      const homebrewPaths = [
-        '/opt/homebrew/bin/python3', // Apple Silicon
-        '/usr/local/bin/python3',    // Intel Mac
-      ];
-
-      for (const pyPath of homebrewPaths) {
-        if (existsSync(pyPath)) {
-          const validation = await this.validatePythonAsync(pyPath);
-          if (validation.valid) {
-            return {
-              found: true,
-              path: pyPath,
-              version: validation.version,
-              source: 'homebrew',
-              message: `Using Homebrew Python: ${pyPath}`
-            };
-          }
-        }
-      }
-    }
-
-    // 4. System PATH (augmented)
-    const candidates =
-      process.platform === 'win32'
-        ? ['py -3', 'python', 'python3', 'py']
-        : ['python3', 'python'];
-
-    for (const cmd of candidates) {
-      if (cmd.startsWith('py ')) {
-        const validation = await this.validatePythonAsync(cmd);
-        if (validation.valid) {
-          return {
-            found: true,
-            path: cmd,
-            version: validation.version,
-            source: 'system-path',
-            message: `Using system Python: ${cmd}`,
-          };
-        }
-      } else {
-        const pythonPath = findExecutable(cmd);
-        if (pythonPath) {
-          const validation = await this.validatePythonAsync(pythonPath);
-          if (validation.valid) {
-            return {
-              found: true,
-              path: pythonPath,
-              version: validation.version,
-              source: 'system-path',
-              message: `Using system Python: ${pythonPath}`,
-            };
-          }
-        }
-      }
-    }
-
-    // 5. Not found
-    return {
-      found: false,
-      source: 'fallback',
-      message:
-        `Python ${MINIMUM_VERSION}+ not found. ` +
-        'Please install Python or configure in Settings.',
-    };
-  }
-
-  /**
-   * Detect Git asynchronously with multi-level priority
-   */
-  private async detectGitAsync(): Promise<ToolDetectionResult> {
-    // 1. User configuration
-    if (this.userConfig.gitPath) {
-      if (isWrongPlatformPath(this.userConfig.gitPath)) {
-        console.warn(
-          `[Git] User-configured path is from different platform, ignoring: ${this.userConfig.gitPath}`
-        );
-      } else {
-        const validation = await this.validateGitAsync(this.userConfig.gitPath);
-        if (validation.valid) {
-          return {
-            found: true,
-            path: this.userConfig.gitPath,
-            version: validation.version,
-            source: 'user-config',
-            message: `Using user-configured Git: ${this.userConfig.gitPath}`,
-          };
-        }
-        console.warn(`[Git] User-configured path invalid: ${validation.message}`);
-      }
-    }
-
-    // 2. Homebrew (macOS)
-    if (process.platform === 'darwin') {
-      const homebrewPaths = [
-        '/opt/homebrew/bin/git',
-        '/usr/local/bin/git',
-      ];
-
-      for (const gitPath of homebrewPaths) {
-        if (existsSync(gitPath)) {
-          const validation = await this.validateGitAsync(gitPath);
-          if (validation.valid) {
-            return {
-              found: true,
-              path: gitPath,
-              version: validation.version,
-              source: 'homebrew',
-              message: `Using Homebrew Git: ${gitPath}`,
-            };
-          }
-        }
-      }
-    }
-
-    // 3. System PATH (augmented)
-    const gitPath = findExecutable('git');
-    if (gitPath) {
-      const validation = await this.validateGitAsync(gitPath);
-      if (validation.valid) {
-        return {
-          found: true,
-          path: gitPath,
-          version: validation.version,
-          source: 'system-path',
-          message: `Using system Git: ${gitPath}`,
-        };
-      }
-    }
-
-    // 4. Not found
-    return {
-      found: false,
-      source: 'fallback',
-      message: 'Git not found in standard locations. Using fallback "git".',
-    };
-  }
-
-  /**
-   * Detect GitHub CLI asynchronously with multi-level priority
-   */
-  private async detectGitHubCLIAsync(): Promise<ToolDetectionResult> {
-    // 1. User configuration
-    if (this.userConfig.githubCLIPath) {
-      if (isWrongPlatformPath(this.userConfig.githubCLIPath)) {
-        console.warn(
-          `[GitHub CLI] User-configured path is from different platform, ignoring: ${this.userConfig.githubCLIPath}`
-        );
-      } else {
-        const validation = await this.validateGitHubCLIAsync(this.userConfig.githubCLIPath);
-        if (validation.valid) {
-          return {
-            found: true,
-            path: this.userConfig.githubCLIPath,
-            version: validation.version,
-            source: 'user-config',
-            message: `Using user-configured GitHub CLI: ${this.userConfig.githubCLIPath}`,
-          };
-        }
-        console.warn(
-          `[GitHub CLI] User-configured path invalid: ${validation.message}`
-        );
-      }
-    }
-
-    // 2. Homebrew (macOS)
-    if (process.platform === 'darwin') {
-      const homebrewPaths = [
-        '/opt/homebrew/bin/gh',
-        '/usr/local/bin/gh',
-      ];
-
-      for (const ghPath of homebrewPaths) {
-        if (existsSync(ghPath)) {
-          const validation = await this.validateGitHubCLIAsync(ghPath);
-          if (validation.valid) {
-            return {
-              found: true,
-              path: ghPath,
-              version: validation.version,
-              source: 'homebrew',
-              message: `Using Homebrew GitHub CLI: ${ghPath}`,
-            };
-          }
-        }
-      }
-    }
-
-    // 3. System PATH (augmented)
-    const ghPath = findExecutable('gh');
-    if (ghPath) {
-      const validation = await this.validateGitHubCLIAsync(ghPath);
-      if (validation.valid) {
-        return {
-          found: true,
-          path: ghPath,
-          version: validation.version,
-          source: 'system-path',
-          message: `Using system GitHub CLI: ${ghPath}`,
-        };
-      }
-    }
-
-    // 4. Windows Program Files
-    if (process.platform === 'win32') {
-      const windowsPaths = [
-        'C:\\Program Files\\GitHub CLI\\gh.exe',
-        'C:\\Program Files (x86)\\GitHub CLI\\gh.exe',
-      ];
-
-      for (const ghPath of windowsPaths) {
-        if (existsSync(ghPath)) {
-          const validation = await this.validateGitHubCLIAsync(ghPath);
-          if (validation.valid) {
-            return {
-              found: true,
-              path: ghPath,
-              version: validation.version,
-              source: 'system-path',
-              message: `Using Windows GitHub CLI: ${ghPath}`,
-            };
-          }
-        }
-      }
-    }
-
-    // 5. Not found
-    return {
-      found: false,
-      source: 'fallback',
-      message: 'GitHub CLI (gh) not found. Install from https://cli.github.com',
-    };
-  }
-
-  /**
-   * Validate Python version asynchronously
-   */
-  private async validatePythonAsync(pythonCmd: string): Promise<ToolValidation> {
-    const MINIMUM_VERSION = '3.10.0';
-
-    try {
-      // Parse command to handle cases like 'py -3' on Windows
-      const parts = pythonCmd.split(' ');
-      const cmd = parts[0];
-      const args = [...parts.slice(1), '--version'];
-
-      const { stdout } = await execFileAsync(cmd, args, {
-        encoding: 'utf-8',
-        timeout: 5000,
-        windowsHide: true,
-      });
-
-      const version = stdout.trim();
-      const match = version.match(/Python (\d+\.\d+\.\d+)/);
-      if (!match) {
-        return {
-          valid: false,
-          message: 'Unable to detect Python version',
-        };
-      }
-
-      const versionStr = match[1];
-      const [major, minor] = versionStr.split('.').map(Number);
-      const [reqMajor, reqMinor] = MINIMUM_VERSION.split('.').map(Number);
-
-      const meetsRequirement =
-        major > reqMajor || (major === reqMajor && minor >= reqMinor);
-
-      if (!meetsRequirement) {
-        return {
-          valid: false,
-          version: versionStr,
-          message: `Python ${versionStr} is too old. Requires ${MINIMUM_VERSION}+`,
-        };
-      }
-
-      return {
-        valid: true,
-        version: versionStr,
-        message: `Python ${versionStr} meets requirements`,
-      };
-    } catch (error) {
-      return {
-        valid: false,
-        message: `Failed to validate Python: ${error}`,
-      };
-    }
-  }
-
-  /**
-   * Validate Git availability and version asynchronously
-   */
-  private async validateGitAsync(gitCmd: string): Promise<ToolValidation> {
-    try {
-      const { stdout } = await execFileAsync(gitCmd, ['--version'], {
-        encoding: 'utf-8',
-        timeout: 5000,
-        windowsHide: true,
-      });
-
-      const version = stdout.trim();
-      const match = version.match(/git version (\d+\.\d+\.\d+)/);
-      const versionStr = match ? match[1] : version;
-
-      return {
-        valid: true,
-        version: versionStr,
-        message: `Git ${versionStr} is available`,
-      };
-    } catch (error) {
-      return {
-        valid: false,
-        message: `Failed to validate Git: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
-  }
-
-  /**
-   * Validate GitHub CLI availability and version asynchronously
-   */
-  private async validateGitHubCLIAsync(ghCmd: string): Promise<ToolValidation> {
-    try {
-      const { stdout } = await execFileAsync(ghCmd, ['--version'], {
-        encoding: 'utf-8',
-        timeout: 5000,
-        windowsHide: true,
-      });
-
-      const version = stdout.trim();
-      const match = version.match(/gh version (\d+\.\d+\.\d+)/);
-      const versionStr = match ? match[1] : version.split('\n')[0];
-
-      return {
-        valid: true,
-        version: versionStr,
-        message: `GitHub CLI ${versionStr} is available`,
-      };
-    } catch (error) {
-      return {
-        valid: false,
-        message: `Failed to validate GitHub CLI: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
   }
 }
 
@@ -1687,13 +1758,6 @@ export function configureTools(config: ToolConfig): void {
  */
 export function getToolInfo(tool: CLITool): ToolDetectionResult {
   return cliToolManager.getToolInfo(tool);
-}
-
-/**
- * Get tool detection info asynchronously (non-blocking)
- */
-export async function getToolInfoAsync(tool: CLITool): Promise<ToolDetectionResult> {
-  return cliToolManager.getToolInfoAsync(tool);
 }
 
 /**
