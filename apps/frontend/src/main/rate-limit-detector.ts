@@ -137,12 +137,13 @@ export function detectRateLimit(
     };
   }
 
-  // Check for repeated "out of extra usage" messages
-  // If it appears multiple times (3+), it means requests are failing = rate limit
+  // Check for "out of extra usage" messages
+  // For API profiles (GLM, LM Studio, etc.), this error appears immediately = rate limit
+  // For OAuth Claude profiles, we need multiple occurrences to distinguish from transient errors
   const extraUsageMatches = output.match(/You're out of extra usage/gi);
-  if (extraUsageMatches && extraUsageMatches.length >= 3) {
-    console.log(`[RateLimitDetector] Detected ${extraUsageMatches.length} "out of extra usage" messages - treating as rate limit`);
-    
+  if (extraUsageMatches && extraUsageMatches.length >= 1) {
+    console.log(`[RateLimitDetector] Detected ${extraUsageMatches.length} "out of extra usage" message(s) - treating as rate limit`);
+
     // Extract reset time if available
     const resetTimeMatch = output.match(/You're out of extra usage\s*[·•]\s*resets\s+(.+?)(?:\s*$|\n)/im);
     const resetTime = resetTimeMatch ? resetTimeMatch[1].trim() : undefined;

@@ -70,6 +70,7 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.reviewReason === nextTask.reviewReason &&
     prevTask.executionProgress?.phase === nextTask.executionProgress?.phase &&
     prevTask.executionProgress?.phaseProgress === nextTask.executionProgress?.phaseProgress &&
+    prevTask.executionProgress?.currentModel === nextTask.executionProgress?.currentModel &&
     prevTask.subtasks.length === nextTask.subtasks.length &&
     prevTask.metadata?.category === nextTask.metadata?.category &&
     prevTask.metadata?.complexity === nextTask.metadata?.complexity &&
@@ -378,29 +379,33 @@ export const TaskCard = memo(function TaskCard({ task, onClick, onStatusChange }
                 )}
               >
                 <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                {EXECUTION_PHASE_LABELS[executionPhase]}
+                {task.executionProgress?.currentModel ? (
+                  <span>{task.executionProgress.currentModel}</span>
+                ) : (
+                  EXECUTION_PHASE_LABELS[executionPhase]
+                )}
               </Badge>
             )}
-             {/* Status badge - hide when execution phase badge is showing */}
-             {!hasActiveExecution && (
-               <>
-                  {task.status === 'pr_created' ? (
-                    <Badge
-                      variant={getStatusBadgeVariant(task.status)}
-                      className="text-[10px] px-1.5 py-0.5"
-                    >
-                      {getStatusLabel(task.status)}
-                    </Badge>
-                  ) : (
-                   <Badge
-                     variant={isStuck ? 'warning' : isIncomplete ? 'warning' : getStatusBadgeVariant(task.status)}
-                     className="text-[10px] px-1.5 py-0.5"
-                   >
-                     {isStuck ? t('labels.needsRecovery') : isIncomplete ? t('labels.needsResume') : getStatusLabel(task.status)}
-                   </Badge>
-                 )}
-               </>
-             )}
+            {/* Status badge - hide when execution phase badge is showing */}
+            {!hasActiveExecution && (
+              <>
+                {task.status === 'pr_created' ? (
+                  <Badge
+                    variant={getStatusBadgeVariant(task.status)}
+                    className="text-[10px] px-1.5 py-0.5"
+                  >
+                    {getStatusLabel(task.status)}
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant={isStuck ? 'warning' : isIncomplete ? 'warning' : getStatusBadgeVariant(task.status)}
+                    className="text-[10px] px-1.5 py-0.5"
+                  >
+                    {isStuck ? t('labels.needsRecovery') : isIncomplete ? t('labels.needsResume') : getStatusLabel(task.status)}
+                  </Badge>
+                )}
+              </>
+            )}
             {/* Review reason badge - explains why task needs human review */}
             {reviewReasonInfo && !isStuck && !isIncomplete && (
               <Badge

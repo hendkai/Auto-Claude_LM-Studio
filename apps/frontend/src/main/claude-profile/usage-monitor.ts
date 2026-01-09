@@ -270,7 +270,7 @@ export class UsageMonitor extends EventEmitter {
             : undefined
         })).map(detail => ({
           label: detail.rawLabel,
-          value: detail.rawLabel === 'TOKEN' ? detail.rawValue : detail.value, // Special formatting for TOKEN if needed, or just use raw strings
+          value: (detail.rawLabel === 'TOKEN' || detail.rawLabel.includes('TOKEN')) ? detail.rawValue : detail.value, // Special formatting for TOKEN/TOKENS_LIMIT
           percentage: detail.percentage,
           resetTime: detail.resetTime
         }));

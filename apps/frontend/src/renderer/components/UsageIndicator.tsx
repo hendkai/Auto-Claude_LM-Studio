@@ -65,7 +65,11 @@ export function UsageIndicator() {
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border transition-all hover:opacity-80 ${colorClasses}`}
             aria-label="Claude usage status"
           >
-            <Icon className="h-3.5 w-3.5" />
+            {usage.customUsageDetails && usage.customUsageDetails.length > 0 ? (
+              <span className="text-[10px] font-bold mr-0.5">GLM</span>
+            ) : (
+              <Icon className="h-3.5 w-3.5" />
+            )}
             <span className="text-xs font-semibold font-mono">
               {Math.round(maxUsage)}%
             </span>
@@ -99,9 +103,9 @@ export function UsageIndicator() {
                     <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
                       <div
                         className={`h-full transition-all ${detail.percentage >= 90 ? 'bg-red-500' :
-                            detail.percentage >= 75 ? 'bg-orange-500' :
-                              detail.percentage >= 50 ? 'bg-yellow-500' :
-                                'bg-green-500'
+                          detail.percentage >= 75 ? 'bg-orange-500' :
+                            detail.percentage >= 50 ? 'bg-yellow-500' :
+                              'bg-green-500'
                           }`}
                         style={{ width: `${Math.min(detail.percentage || 0, 100)}%` }}
                       />
@@ -127,9 +131,9 @@ export function UsageIndicator() {
                   <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
                     <div
                       className={`h-full transition-all ${usage.sessionPercent >= 95 ? 'bg-red-500' :
-                          usage.sessionPercent >= 91 ? 'bg-orange-500' :
-                            usage.sessionPercent >= 71 ? 'bg-yellow-500' :
-                              'bg-green-500'
+                        usage.sessionPercent >= 91 ? 'bg-orange-500' :
+                          usage.sessionPercent >= 71 ? 'bg-yellow-500' :
+                            'bg-green-500'
                         }`}
                       style={{ width: `${Math.min(usage.sessionPercent, 100)}%` }}
                     />
@@ -153,9 +157,9 @@ export function UsageIndicator() {
                   <div className="mt-1.5 h-1.5 bg-muted rounded-full overflow-hidden">
                     <div
                       className={`h-full transition-all ${usage.weeklyPercent >= 99 ? 'bg-red-500' :
-                          usage.weeklyPercent >= 91 ? 'bg-orange-500' :
-                            usage.weeklyPercent >= 71 ? 'bg-yellow-500' :
-                              'bg-green-500'
+                        usage.weeklyPercent >= 91 ? 'bg-orange-500' :
+                          usage.weeklyPercent >= 71 ? 'bg-yellow-500' :
+                            'bg-green-500'
                         }`}
                       style={{ width: `${Math.min(usage.weeklyPercent, 100)}%` }}
                     />
