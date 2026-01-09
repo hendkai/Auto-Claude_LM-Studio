@@ -280,6 +280,7 @@ export interface GiteaSyncStatus {
   connected: boolean;
   instanceUrl?: string;
   repoFullName?: string; // owner/repo
+  repoDescription?: string;
   issueCount?: number;
   lastSyncedAt?: string;
   error?: string;

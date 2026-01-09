@@ -170,11 +170,12 @@ export function registerProfileHandlers(): void {
 
         // Auto-start LiteLLM if profile uses localhost:4000
         // Check both normalized and original URL patterns
-        const isLiteLLMProfile = activeProfileBaseUrl && (
-          activeProfileBaseUrl.includes('localhost:4000') ||
-          activeProfileBaseUrl.includes('127.0.0.1:4000') ||
-          activeProfileBaseUrl === 'http://localhost:4000' ||
-          activeProfileBaseUrl === 'http://127.0.0.1:4000'
+        const urlToCheck = activeProfileBaseUrl as string | null;
+        const isLiteLLMProfile = (urlToCheck !== null) && (
+          urlToCheck.includes('localhost:4000') ||
+          urlToCheck.includes('127.0.0.1:4000') ||
+          urlToCheck === 'http://localhost:4000' ||
+          urlToCheck === 'http://127.0.0.1:4000'
         );
 
         if (isLiteLLMProfile) {

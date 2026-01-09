@@ -103,6 +103,7 @@ export function mapStatusToPlanStatus(status: TaskStatus): string {
 export async function persistPlanStatus(planPath: string, status: TaskStatus, projectId?: string): Promise<boolean> {
   return withPlanLock(planPath, async () => {
     try {
+      console.warn(`[plan-file-utils] Reading implementation_plan.json to update status to: ${status}`, { planPath });
       // Read file asynchronously to prevent main thread blocking
       const planContent = await fs.readFile(planPath, 'utf-8');
       const plan = JSON.parse(planContent);
@@ -113,6 +114,7 @@ export async function persistPlanStatus(planPath: string, status: TaskStatus, pr
 
       // Write file asynchronously to prevent main thread blocking
       await fs.writeFile(planPath, JSON.stringify(plan, null, 2));
+      console.warn(`[plan-file-utils] Successfully persisted status: ${status} to implementation_plan.json`);
 
       // Invalidate tasks cache since status changed
       if (projectId) {
@@ -123,6 +125,7 @@ export async function persistPlanStatus(planPath: string, status: TaskStatus, pr
     } catch (err) {
       // File not found is expected - return false
       if (isFileNotFoundError(err)) {
+        console.warn(`[plan-file-utils] implementation_plan.json not found at ${planPath} - status not persisted`);
         return false;
       }
       console.warn(`[plan-file-utils] Could not persist status to ${planPath}:`, err);
@@ -197,6 +200,7 @@ export async function updatePlanFile<T extends Record<string, unknown>>(
 ): Promise<T | null> {
   return withPlanLock(planPath, async () => {
     try {
+      console.warn(`[plan-file-utils] Reading implementation_plan.json for update`, { planPath });
       // Read file asynchronously to prevent main thread blocking
       const planContent = await fs.readFile(planPath, 'utf-8');
       const plan = JSON.parse(planContent) as T;
@@ -207,10 +211,12 @@ export async function updatePlanFile<T extends Record<string, unknown>>(
 
       // Write file asynchronously to prevent main thread blocking
       await fs.writeFile(planPath, JSON.stringify(updatedPlan, null, 2));
+      console.warn(`[plan-file-utils] Successfully updated implementation_plan.json`);
       return updatedPlan;
     } catch (err) {
       // File not found is expected - return null
       if (isFileNotFoundError(err)) {
+        console.warn(`[plan-file-utils] implementation_plan.json not found at ${planPath} - update skipped`);
         return null;
       }
       console.warn(`[plan-file-utils] Could not update plan at ${planPath}:`, err);

@@ -43,6 +43,8 @@ export function createHookProxy(
     get setShowGitLabToken() { return hookRef.current.setShowGitLabToken; },
     get gitLabConnectionStatus() { return hookRef.current.gitLabConnectionStatus; },
     get isCheckingGitLab() { return hookRef.current.isCheckingGitLab; },
+    get giteaConnectionStatus() { return hookRef.current.giteaConnectionStatus; },
+    get isCheckingGitea() { return hookRef.current.isCheckingGitea; },
     get isCheckingClaudeAuth() { return hookRef.current.isCheckingClaudeAuth; },
     get claudeAuthStatus() { return hookRef.current.claudeAuthStatus; },
     get setClaudeAuthStatus() { return hookRef.current.setClaudeAuthStatus; },

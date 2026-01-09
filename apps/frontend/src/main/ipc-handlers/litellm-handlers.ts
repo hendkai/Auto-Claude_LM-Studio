@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
 import { getLiteLLMService, LiteLLMStatus } from '../services/litellm-service';
-import type { IPCResult } from '../../shared/types/ipc';
+import type { IPCResult } from '../../shared/types';
 import { IPC_CHANNELS } from '../../shared/constants/ipc';
 
 /**
