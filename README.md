@@ -16,8 +16,15 @@ This fork extends Auto-Claude with powerful customization options:
 ### 🤖 **Custom AI Provider Support**
 - **LM Studio Integration** - Run local models on your own hardware
 - **LiteLLM Proxy** - Connect to any LLM provider (Ollama, OpenAI-compatible endpoints, etc.)
+- **GLM Support** - Use Zhipu AI's GLM models alongside other providers
 - **No API Costs** - Use completely free local models
 - **Privacy First** - Keep your code on your machine
+
+### 🔄 **Intelligent Provider Management**
+- **Automatic Provider Switching** - Seamlessly switches to backup providers when token limits are reached
+- **Per-Step Model Selection** - Configure different models for each work phase (planning, coding, review)
+- **Fallback Chains** - Define priority-ordered model chains that auto-switch on rate limits or errors
+- **Cost Optimization** - Use expensive models only where needed, cheaper/local models elsewhere
 
 ### ✨ **Additional Enhancements**
 - **Flexible Model Configuration** - Mix and match providers per project
