@@ -127,22 +127,52 @@ export function registerAgenteventsHandlers(
     }
 
     const mainWindow = getMainWindow();
-    if (mainWindow) {
+    if (!mainWindow) {
+      console.warn(`[Task ${taskId}] Exit handler: No main window available`);
+      // Still cleanup file watcher even if no window
+      try {
+        await fileWatcher.unwatch(taskId);
+      } catch (unwatchError) {
+        console.error(`[Task ${taskId}] Failed to unwatch during no-window cleanup:`, unwatchError);
+      }
+      return;
+    }
+
+    try {
       // Get project info early for multi-project filtering (issue #723)
-      const { project: exitProject } = findTaskAndProject(taskId);
-      const exitProjectId = exitProject?.id;
+      let exitProjectId: string | undefined;
+      try {
+        const { project: exitProject } = findTaskAndProject(taskId);
+        exitProjectId = exitProject?.id;
+      } catch (findError) {
+        console.error(`[Task ${taskId}] Failed to find project info:`, findError);
+      }
 
       // Cleanup status cache
-      lastTaskStatus.delete(taskId);
+      try {
+        lastTaskStatus.delete(taskId);
+      } catch (cacheError) {
+        console.error(`[Task ${taskId}] Failed to cleanup status cache:`, cacheError);
+      }
 
       // Send final plan state to renderer BEFORE unwatching
       // This ensures the renderer has the final subtask data (fixes 0/0 subtask bug)
-      const finalPlan = fileWatcher.getCurrentPlan(taskId);
-      if (finalPlan) {
-        mainWindow.webContents.send(IPC_CHANNELS.TASK_PROGRESS, taskId, finalPlan, exitProjectId);
+      try {
+        const finalPlan = fileWatcher.getCurrentPlan(taskId);
+        if (finalPlan) {
+          mainWindow.webContents.send(IPC_CHANNELS.TASK_PROGRESS, taskId, finalPlan, exitProjectId);
+        }
+      } catch (planError) {
+        console.error(`[Task ${taskId}] Failed to send final plan state:`, planError);
       }
 
-      await fileWatcher.unwatch(taskId);
+      // CRITICAL: Always unwatch file watcher, even if other operations fail
+      try {
+        await fileWatcher.unwatch(taskId);
+      } catch (unwatchError) {
+        console.error(`[Task ${taskId}] Failed to unwatch file watcher:`, unwatchError);
+        // Continue execution - this shouldn't prevent status updates
+      }
 
       if (processType === 'spec-creation') {
         console.warn(`[Task ${taskId}] Spec creation completed with code ${code}`);
@@ -158,15 +188,23 @@ export function registerAgenteventsHandlers(
         // IMPORTANT: Invalidate cache for all projects to ensure we get fresh data
         // This prevents race conditions where cached task data has stale status
         for (const p of projects) {
-          projectStore.invalidateTasksCache(p.id);
+          try {
+            projectStore.invalidateTasksCache(p.id);
+          } catch (invalidateError) {
+            console.error(`[Task ${taskId}] Failed to invalidate cache for project ${p.id}:`, invalidateError);
+          }
         }
 
         for (const p of projects) {
-          const tasks = projectStore.getTasks(p.id);
-          task = tasks.find((t) => t.id === taskId || t.specId === taskId);
-          if (task) {
-            project = p;
-            break;
+          try {
+            const tasks = projectStore.getTasks(p.id);
+            task = tasks.find((t) => t.id === taskId || t.specId === taskId);
+            if (task) {
+              project = p;
+              break;
+            }
+          } catch (getTasksError) {
+            console.error(`[Task ${taskId}] Failed to get tasks for project ${p.id}:`, getTasksError);
           }
         }
 
@@ -183,33 +221,45 @@ export function registerAgenteventsHandlers(
           // Use shared utility for persisting status (prevents race conditions)
           // Persist to both main project AND worktree (if exists) for consistency
           const persistStatus = async (status: TaskStatus) => {
-            // Persist to main project
-            // Use async persistPlanStatus which uses locks, preventing race conditions with TASK_UPDATE_STATUS
-            const mainPersisted = await persistPlanStatus(mainPlanPath, status, projectId);
-            if (mainPersisted) {
-              console.warn(`[Task ${taskId}] Persisted status to main plan: ${status}`);
+            try {
+              // Persist to main project
+              // Use async persistPlanStatus which uses locks, preventing race conditions with TASK_UPDATE_STATUS
+              const mainPersisted = await persistPlanStatus(mainPlanPath, status, projectId);
+              if (mainPersisted) {
+                console.warn(`[Task ${taskId}] Persisted status to main plan: ${status}`);
+              }
+            } catch (mainPersistError) {
+              console.error(`[Task ${taskId}] Failed to persist status to main plan:`, mainPersistError);
             }
 
-            // Also persist to worktree if it exists
-            const worktreePath = findTaskWorktree(projectPath, taskSpecId);
-            if (worktreePath) {
-              const specsBaseDir = getSpecsDir(autoBuildPath);
-              const worktreePlanPath = path.join(
-                worktreePath,
-                specsBaseDir,
-                taskSpecId,
-                AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN
-              );
-              // Use EAFP instead of existsSync to avoid race conditions
-              const worktreePersisted = await persistPlanStatus(worktreePlanPath, status, projectId);
-              if (worktreePersisted) {
-                console.warn(`[Task ${taskId}] Persisted status to worktree plan: ${status}`);
+            try {
+              // Also persist to worktree if it exists
+              const worktreePath = findTaskWorktree(projectPath, taskSpecId);
+              if (worktreePath) {
+                const specsBaseDir = getSpecsDir(autoBuildPath);
+                const worktreePlanPath = path.join(
+                  worktreePath,
+                  specsBaseDir,
+                  taskSpecId,
+                  AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN
+                );
+                // Use EAFP instead of existsSync to avoid race conditions
+                const worktreePersisted = await persistPlanStatus(worktreePlanPath, status, projectId);
+                if (worktreePersisted) {
+                  console.warn(`[Task ${taskId}] Persisted status to worktree plan: ${status}`);
+                }
               }
+            } catch (worktreePersistError) {
+              console.error(`[Task ${taskId}] Failed to persist status to worktree plan:`, worktreePersistError);
             }
           };
 
           if (code === 0) {
-            notificationService.notifyReviewNeeded(taskTitle, project.id, taskId);
+            try {
+              notificationService.notifyReviewNeeded(taskTitle, project.id, taskId);
+            } catch (notifyError) {
+              console.error(`[Task ${taskId}] Failed to send review notification:`, notifyError);
+            }
 
             // Fallback: Ensure status is updated even if COMPLETE phase event was missed
             // This prevents tasks from getting stuck in ai_review status
@@ -223,6 +273,32 @@ export function registerAgenteventsHandlers(
             if (isActiveStatus && hasSubtasks && !hasIncompleteSubtasks) {
               // All subtasks completed - safe to move to human_review
               console.warn(`[Task ${taskId}] Fallback: Moving to human_review (process exited successfully, all ${task.subtasks.length} subtasks completed)`);
+              try {
+                await persistStatus('human_review');
+                // Include projectId for multi-project filtering (issue #723)
+                mainWindow.webContents.send(
+                  IPC_CHANNELS.TASK_STATUS_CHANGE,
+                  taskId,
+                  'human_review' as TaskStatus,
+                  projectId
+                );
+              } catch (statusUpdateError) {
+                console.error(`[Task ${taskId}] Failed to update status to human_review:`, statusUpdateError);
+              }
+            } else if (isActiveStatus && !hasSubtasks) {
+              // No subtasks yet - task is still in planning phase, don't change status
+              // This prevents the bug where tasks jump to human_review before planning completes
+              console.warn(`[Task ${taskId}] Process exited but no subtasks created yet - keeping current status (${task.status})`);
+            }
+          } else {
+            // Process failed (non-zero exit code)
+            try {
+              notificationService.notifyTaskFailed(taskTitle, project.id, taskId);
+            } catch (notifyError) {
+              console.error(`[Task ${taskId}] Failed to send failure notification:`, notifyError);
+            }
+
+            try {
               await persistStatus('human_review');
               // Include projectId for multi-project filtering (issue #723)
               mainWindow.webContents.send(
@@ -231,25 +307,24 @@ export function registerAgenteventsHandlers(
                 'human_review' as TaskStatus,
                 projectId
               );
-            } else if (isActiveStatus && !hasSubtasks) {
-              // No subtasks yet - task is still in planning phase, don't change status
-              // This prevents the bug where tasks jump to human_review before planning completes
-              console.warn(`[Task ${taskId}] Process exited but no subtasks created yet - keeping current status (${task.status})`);
+            } catch (statusUpdateError) {
+              console.error(`[Task ${taskId}] Failed to update status after failure:`, statusUpdateError);
             }
-          } else {
-            notificationService.notifyTaskFailed(taskTitle, project.id, taskId);
-            await persistStatus('human_review');
-            // Include projectId for multi-project filtering (issue #723)
-            mainWindow.webContents.send(
-              IPC_CHANNELS.TASK_STATUS_CHANGE,
-              taskId,
-              'human_review' as TaskStatus,
-              projectId
-            );
           }
+        } else {
+          console.warn(`[Task ${taskId}] Exit handler: Task or project not found after process exit`);
         }
       } catch (error) {
-        console.error(`[Task ${taskId}] Exit handler error:`, error);
+        console.error(`[Task ${taskId}] Exit handler error in main processing:`, error);
+      }
+    } catch (outerError) {
+      // Catch-all for any unexpected errors in the exit handler itself
+      console.error(`[Task ${taskId}] Critical error in exit handler:`, outerError);
+      // Still attempt to cleanup file watcher as last resort
+      try {
+        await fileWatcher.unwatch(taskId);
+      } catch (finalUnwatchError) {
+        console.error(`[Task ${taskId}] Failed final file watcher cleanup:`, finalUnwatchError);
       }
     }
   });

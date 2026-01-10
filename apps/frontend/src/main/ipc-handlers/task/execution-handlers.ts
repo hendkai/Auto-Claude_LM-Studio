@@ -518,19 +518,33 @@ export function registerTaskExecutionHandlers(
         if (status !== 'in_progress' && agentManager.isRunning(taskId)) {
           console.warn('[TASK_UPDATE_STATUS] Stopping task due to status change away from in_progress:', taskId);
 
-          // Prevent race condition causing crash (simultaneous file access/event handling):
-          // 1. Unwatch immediately to prevent "progress" events from file updates
-          await fileWatcher.unwatch(taskId);
-          // 2. Tell agent manager to ignore the "exit" event for this specific kill
-          //    This prevents the exit handler from satisfying "on exit" logic (persistence)
-          //    while we represent the authoritative state change here
-          agentManager.setIgnoreExit(taskId, true);
+          try {
+            // Prevent race condition causing crash (simultaneous file access/event handling):
+            // 1. Unwatch immediately to prevent "progress" events from file updates
+            await fileWatcher.unwatch(taskId);
+          } catch (unwatchError) {
+            console.error('[TASK_UPDATE_STATUS] Failed to unwatch file watcher:', unwatchError);
+            // Continue anyway - this shouldn't prevent status update
+          }
 
-          agentManager.killTask(taskId);
+          try {
+            // 2. Tell agent manager to ignore the "exit" event for this specific kill
+            //    This prevents the exit handler from satisfying "on exit" logic (persistence)
+            //    while we represent the authoritative state change here
+            agentManager.setIgnoreExit(taskId, true);
 
-          // Give the process a moment to release file handles/locks
-          console.debug('[TASK_UPDATE_STATUS] Waiting 200ms for process to cleanup...');
-          await new Promise(resolve => setTimeout(resolve, 200));
+            agentManager.killTask(taskId);
+
+            // Give the process a moment to release file handles/locks
+            console.debug('[TASK_UPDATE_STATUS] Waiting 200ms for process to cleanup...');
+            await new Promise(resolve => setTimeout(resolve, 200));
+          } catch (killError) {
+            console.error('[TASK_UPDATE_STATUS] Failed to kill task:', killError);
+            // Reset the ignore flag on error
+            try {
+              agentManager.setIgnoreExit(taskId, false);
+            } catch { }
+          }
         }
 
         // Use shared utility for thread-safe plan file updates

@@ -2,7 +2,7 @@
  * Task-related types
  */
 
-import type { ThinkingLevel, PhaseModelConfig, PhaseThinkingConfig } from './settings';
+import type { ThinkingLevel, PhaseModelConfig, PhaseThinkingConfig, PhaseModelConfigV3 } from './settings';
 import type { ExecutionPhase as ExecutionPhaseType } from '../constants/phase-protocol';
 
 export type TaskStatus = 'backlog' | 'in_progress' | 'ai_review' | 'human_review' | 'pr_created' | 'done';
@@ -224,8 +224,9 @@ export interface TaskMetadata {
   thinkingLevel?: ThinkingLevel;  // Thinking budget level (none, low, medium, high, ultrathink)
   // Auto profile - per-phase model configuration
   isAutoProfile?: boolean;  // True when using Auto (Optimized) profile
-  phaseModels?: PhaseModelConfig;  // Per-phase model configuration
+  phaseModels?: PhaseModelConfig;  // Per-phase model configuration (V1 - deprecated)
   phaseThinking?: PhaseThinkingConfig;  // Per-phase thinking configuration
+  phaseModelsV3?: PhaseModelConfigV3;  // Per-phase model configuration (V3 with ProfileModelPair arrays and fallback chains)
 
   // Git/Worktree configuration
   baseBranch?: string;  // Override base branch for this task's worktree

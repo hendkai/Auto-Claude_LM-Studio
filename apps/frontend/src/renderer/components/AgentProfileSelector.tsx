@@ -26,7 +26,10 @@ import {
   DEFAULT_PHASE_THINKING
 } from '../../shared/constants';
 import type { ModelType, ThinkingLevel } from '../../shared/types';
-import type { PhaseModelConfig, PhaseThinkingConfig } from '../../shared/types/settings';
+import type { PhaseModelConfig, PhaseThinkingConfig, PhaseModelConfigV3, ProfileModelPair } from '../../shared/types/settings';
+import { getCurrentPhaseConfigV3 } from '../../shared/utils/phase-config-migration';
+import { MultiProfileModelSelect } from './settings/MultiProfileModelSelect';
+import { useSettingsStore } from '../stores/settings-store';
 import { cn } from '../lib/utils';
 
 interface AgentProfileSelectorProps {
@@ -36,8 +39,8 @@ interface AgentProfileSelectorProps {
   model: ModelType | '';
   /** Current thinking level value (fallback for non-auto profiles) */
   thinkingLevel: ThinkingLevel | '';
-  /** Phase model configuration (for auto profile) */
-  phaseModels?: PhaseModelConfig;
+  /** Phase model configuration (V3 with ProfileModelPair arrays) */
+  phaseModelsV3?: PhaseModelConfigV3;
   /** Phase thinking configuration (for auto profile) */
   phaseThinking?: PhaseThinkingConfig;
   /** Called when profile selection changes */
@@ -46,8 +49,8 @@ interface AgentProfileSelectorProps {
   onModelChange: (model: ModelType) => void;
   /** Called when thinking level changes (in custom mode) */
   onThinkingLevelChange: (level: ThinkingLevel) => void;
-  /** Called when phase models change (in auto mode) */
-  onPhaseModelsChange?: (phaseModels: PhaseModelConfig) => void;
+  /** Called when phase models change (in auto mode) - V3 version */
+  onPhaseModelsV3Change?: (phaseModels: PhaseModelConfigV3) => void;
   /** Called when phase thinking changes (in auto mode) */
   onPhaseThinkingChange?: (phaseThinking: PhaseThinkingConfig) => void;
   /** Whether the selector is disabled */
@@ -73,23 +76,27 @@ export function AgentProfileSelector({
   profileId,
   model,
   thinkingLevel,
-  phaseModels,
+  phaseModelsV3,
   phaseThinking,
   onProfileChange,
   onModelChange,
   onThinkingLevelChange,
-  onPhaseModelsChange,
+  onPhaseModelsV3Change,
   onPhaseThinkingChange,
   disabled
 }: AgentProfileSelectorProps) {
   const { t } = useTranslation('settings');
   const [showPhaseDetails, setShowPhaseDetails] = useState(false);
+  const { settings } = useSettingsStore();
 
   const isCustom = profileId === 'custom';
   const isAuto = profileId === 'auto';
 
-  // Use provided phase configs or defaults
-  const currentPhaseModels = phaseModels || DEFAULT_PHASE_MODELS;
+  // Use provided V3 config or migrate from defaults
+  const currentPhaseModelsV3: PhaseModelConfigV3 = phaseModelsV3 || (() => {
+    const activeProfileId = settings.selectedAgentProfile || 'auto';
+    return getCurrentPhaseConfigV3(settings, DEFAULT_PHASE_MODELS, activeProfileId);
+  })();
   const currentPhaseThinking = phaseThinking || DEFAULT_PHASE_THINKING;
 
   const handleProfileSelect = (selectedId: string) => {
@@ -102,8 +109,11 @@ export function AgentProfileSelector({
       if (profile) {
         onProfileChange(profile.id, profile.model, profile.thinkingLevel);
         // Initialize phase configs with profile defaults if callbacks provided
-        if (onPhaseModelsChange && profile.phaseModels) {
-          onPhaseModelsChange(profile.phaseModels);
+        if (onPhaseModelsV3Change && profile.phaseModels) {
+          // Migrate V1 profile defaults to V3
+          const activeProfileId = settings.selectedAgentProfile || 'auto';
+          const v3Config = getCurrentPhaseConfigV3({ customPhaseModels: profile.phaseModels }, DEFAULT_PHASE_MODELS, activeProfileId);
+          onPhaseModelsV3Change(v3Config);
         }
         if (onPhaseThinkingChange && profile.phaseThinking) {
           onPhaseThinkingChange(profile.phaseThinking);
@@ -112,12 +122,12 @@ export function AgentProfileSelector({
     }
   };
 
-  const handlePhaseModelChange = (phase: keyof PhaseModelConfig, value: ModelType) => {
-    if (onPhaseModelsChange) {
-      onPhaseModelsChange({
-        ...currentPhaseModels,
-        [phase]: value
-      });
+  const handlePhaseModelChange = (phase: keyof PhaseModelConfigV3, value: ProfileModelPair) => {
+    if (onPhaseModelsV3Change) {
+      // Update the primary model (index 0) for the phase
+      const updated = { ...currentPhaseModelsV3 };
+      updated[phase] = [value, ...currentPhaseModelsV3[phase].slice(1)];
+      onPhaseModelsV3Change(updated);
     }
   };
 
@@ -247,12 +257,14 @@ export function AgentProfileSelector({
           {!showPhaseDetails && (
             <div className="px-4 pb-4 -mt-1">
               <div className="grid grid-cols-2 gap-2 text-xs">
-                {(Object.keys(PHASE_LABEL_KEYS) as Array<keyof PhaseModelConfig>).map((phase) => {
-                  const modelLabel = AVAILABLE_MODELS.find(m => m.value === currentPhaseModels[phase])?.label?.replace('Claude ', '') || currentPhaseModels[phase];
+                {(Object.keys(PHASE_LABEL_KEYS) as Array<keyof PhaseModelConfigV3>).map((phase) => {
+                  // Get primary model (first in array) for display
+                  const primaryModel = currentPhaseModelsV3[phase][0];
+                  const modelLabel = primaryModel?.model || 'Not set';
                   return (
                     <div key={phase} className="flex items-center justify-between rounded bg-background/50 px-2 py-1">
                       <span className="text-muted-foreground">{t(PHASE_LABEL_KEYS[phase].label)}:</span>
-                      <span className="font-medium">{modelLabel}</span>
+                      <span className="font-medium truncate ml-2" title={modelLabel}>{modelLabel}</span>
                     </div>
                   );
                 })}
@@ -263,7 +275,7 @@ export function AgentProfileSelector({
           {/* Detailed Phase Configuration */}
           {showPhaseDetails && (
             <div className="px-4 pb-4 space-y-4 border-t border-border pt-4">
-              {(Object.keys(PHASE_LABEL_KEYS) as Array<keyof PhaseModelConfig>).map((phase) => (
+              {(Object.keys(PHASE_LABEL_KEYS) as Array<keyof PhaseModelConfigV3>).map((phase) => (
                 <div key={phase} className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label className="text-xs font-medium text-foreground">
@@ -276,22 +288,12 @@ export function AgentProfileSelector({
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
                       <Label className="text-[10px] text-muted-foreground">{t('agentProfile.model')}</Label>
-                      <Select
-                        value={currentPhaseModels[phase]}
-                        onValueChange={(value) => handlePhaseModelChange(phase, value as ModelType)}
+                      <MultiProfileModelSelect
+                        value={currentPhaseModelsV3[phase][0]}
+                        onChange={(value) => handlePhaseModelChange(phase, value)}
                         disabled={disabled}
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {AVAILABLE_MODELS.map((m) => (
-                            <SelectItem key={m.value} value={m.value}>
-                              {m.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        className="h-8 text-xs"
+                      />
                     </div>
                     <div className="space-y-1">
                       <Label className="text-[10px] text-muted-foreground">{t('agentProfile.thinking')}</Label>

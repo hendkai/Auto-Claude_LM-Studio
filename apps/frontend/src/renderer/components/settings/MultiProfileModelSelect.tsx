@@ -107,10 +107,10 @@ export function MultiProfileModelSelect({
                     // Claude OAuth accounts have access to the same models as API
                     // We use a static list since OAuth uses claude.ai, not an API endpoint
                     const claudeModels: ModelInfo[] = [
-                        { id: 'claude-sonnet-4', display_name: 'Claude Sonnet 4' },
+                        { id: 'claude-sonnet-4-5-20250929', display_name: 'Claude Sonnet 4.5' },
                         { id: 'claude-code', display_name: 'Claude Code' },
-                        { id: 'claude-haiku-4', display_name: 'Claude Haiku 4' },
-                        { id: 'claude-opus-4', display_name: 'Claude Opus 4' }
+                        { id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 4.5' },
+                        { id: 'claude-opus-4-5-20251101', display_name: 'Claude Opus 4.5' }
                     ];
 
                     results.push({
