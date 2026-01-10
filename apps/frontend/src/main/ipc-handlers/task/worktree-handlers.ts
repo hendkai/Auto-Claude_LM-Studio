@@ -1302,8 +1302,8 @@ function getTaskBaseBranch(specDir: string): string | undefined {
       // Return baseBranch if explicitly set (not the __project_default__ marker)
       // Also validate it's a valid branch name to prevent malformed git commands
       if (metadata.baseBranch &&
-          metadata.baseBranch !== '__project_default__' &&
-          GIT_BRANCH_REGEX.test(metadata.baseBranch)) {
+        metadata.baseBranch !== '__project_default__' &&
+        GIT_BRANCH_REGEX.test(metadata.baseBranch)) {
         return metadata.baseBranch;
       }
     }
@@ -1413,7 +1413,7 @@ function parsePRJsonOutput(stdout: string): ParsedPRResult | null {
     // Handle both snake_case (from Python) and camelCase field names
     // Default success to false to avoid masking failures when field is missing
     const rawPrUrl = typeof parsed.pr_url === 'string' ? parsed.pr_url :
-                     typeof parsed.prUrl === 'string' ? parsed.prUrl : undefined;
+      typeof parsed.prUrl === 'string' ? parsed.prUrl : undefined;
 
     // Validate PR URL is a valid GitHub URL for robustness
     const validatedPrUrl = rawPrUrl && isValidGitHubUrl(rawPrUrl) ? rawPrUrl : undefined;
@@ -1422,7 +1422,7 @@ function parsePRJsonOutput(stdout: string): ParsedPRResult | null {
       success: typeof parsed.success === 'boolean' ? parsed.success : false,
       prUrl: validatedPrUrl,
       alreadyExists: typeof parsed.already_exists === 'boolean' ? parsed.already_exists :
-                     typeof parsed.alreadyExists === 'boolean' ? parsed.alreadyExists : undefined,
+        typeof parsed.alreadyExists === 'boolean' ? parsed.alreadyExists : undefined,
       error: typeof parsed.error === 'string' ? parsed.error : undefined
     };
   } catch {
@@ -2020,8 +2020,8 @@ export function registerWorktreeHandlers(
               // Check if merge might have succeeded before the hang
               // Look for success indicators in the output
               const mayHaveSucceeded = stdout.includes('staged') ||
-                                       stdout.includes('Successfully merged') ||
-                                       stdout.includes('Changes from');
+                stdout.includes('Successfully merged') ||
+                stdout.includes('Changes from');
 
               if (mayHaveSucceeded) {
                 debug('TIMEOUT: Process hung but merge may have succeeded based on output');
@@ -2586,6 +2586,196 @@ export function registerWorktreeHandlers(
    * Discard the worktree changes
    * Per-spec architecture: Each spec has its own worktree at .auto-claude/worktrees/tasks/{spec-name}/
    */
+  /**
+   * Resolve merge conflicts using AI
+   * 1. Identifies conflicting files
+   * 2. For each file, reads the content with conflict markers
+   * 3. Sends to Claude to resolve based on markers
+   * 4. Writes back resolved content and stages the file
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.TASK_WORKTREE_RESOLVE_CONFLICTS,
+    async (_, taskId: string, files?: string[]): Promise<IPCResult<{ resolved: string[]; failed: string[] }>> => {
+      console.warn('[IPC] TASK_WORKTREE_RESOLVE_CONFLICTS called for taskId:', taskId);
+      try {
+        // Ensure Python environment is ready
+        if (!pythonEnvManagerSingleton.isEnvReady()) {
+          const autoBuildSource = getEffectiveSourcePath();
+          if (autoBuildSource) {
+            const status = await pythonEnvManagerSingleton.initialize(autoBuildSource);
+            if (!status.ready) {
+              return { success: false, error: `Python environment not ready: ${status.error}` };
+            }
+          } else {
+            return { success: false, error: 'Auto Claude source not found' };
+          }
+        }
+
+        const { task, project } = findTaskAndProject(taskId);
+        if (!task || !project) {
+          return { success: false, error: 'Task not found' };
+        }
+
+        // Identify conflicting files if not provided
+        let conflictFiles = files || [];
+        if (conflictFiles.length === 0) {
+          try {
+            const gitStatus = execFileSync(getToolPath('git'), ['diff', '--name-only', '--diff-filter=U'], {
+              cwd: project.path,
+              encoding: 'utf-8'
+            });
+            conflictFiles = gitStatus.split('\n').map(f => f.trim()).filter(f => f);
+          } catch (e) {
+            console.error('[IPC] Failed to get conflict files:', e);
+            return { success: false, error: 'Failed to identify conflicting files' };
+          }
+        }
+
+        if (conflictFiles.length === 0) {
+          return { success: true, data: { resolved: [], failed: [] } };
+        }
+
+        const resolved: string[] = [];
+        const failed: string[] = [];
+        const autoBuildSource = getEffectiveSourcePath();
+        if (!autoBuildSource) return { success: false, error: 'Source path not found' };
+
+        const pythonPath = getConfiguredPythonPath();
+        const profileEnv = getProfileEnv();
+        const pythonEnv = pythonEnvManagerSingleton.getPythonEnv();
+        const [pythonCommand, pythonBaseArgs] = parsePythonCommand(pythonPath);
+
+        // Get configured model settings
+        const { modelId, thinkingLevel, thinkingBudget } = getUtilitySettings();
+
+        // Process each file
+        for (const file of conflictFiles) {
+          try {
+            // Read file with conflict markers
+            const filePath = path.isAbsolute(file) ? file : path.join(project.path, file);
+            if (!existsSync(filePath)) {
+              failed.push(file);
+              continue;
+            }
+
+            const content = readFileSync(filePath, 'utf-8');
+            if (!content.includes('<<<<<<<') || !content.includes('=======')) {
+              // No markers? might be binary or already resolved. Skip AI but try to add.
+              resolved.push(file);
+              try {
+                execFileSync(getToolPath('git'), ['add', file], { cwd: project.path });
+              } catch { }
+              continue;
+            }
+
+            // Create resolution script
+            const prompt = `You are an expert software engineer resolving a git merge conflict.
+The file content below contains git conflict markers (<<<<<<<, =======, >>>>>>>).
+Please resolve the conflicts by combining the changes logically, preferring the 'Incoming Change' (the part from the feature branch) but respecting the 'Current Change' (main branch) where appropriate.
+Ensure the code is syntactically correct and functioning.
+Output ONLY the resolved file content, nothing else. Do not output markdown code blocks.
+
+File Content:
+${content}`;
+
+            const escapedPrompt = JSON.stringify(prompt);
+
+            // Generate Python script dynamically
+            // Inject conditional thinking config if budget allows/exists
+            const thinkingConfig = thinkingBudget
+              ? `, "thinking": { "type": "enabled", "budget_tokens": ${thinkingBudget} }`
+              : '';
+
+            const script = `
+import asyncio
+import sys
+
+async def resolve_conflict():
+    try:
+        from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+
+        prompt = ${escapedPrompt}
+
+        client = ClaudeSDKClient(
+            options=ClaudeAgentOptions(
+                model="${modelId}",
+                system_prompt="You are a code merge conflict resolver. Output ONLY the raw code content. No markdown formatting.",
+                max_turns=1${thinkingConfig}
+            )
+        )
+
+        async with client:
+            await client.query(prompt)
+            response_text = ""
+            async for msg in client.receive_response():
+                if type(msg).__name__ == "AssistantMessage" and hasattr(msg, "content"):
+                    for block in msg.content:
+                        if type(block).__name__ == "TextBlock" and hasattr(block, "text"):
+                            response_text += block.text
+
+            if response_text:
+                print(response_text)
+                sys.exit(0)
+        sys.exit(1)
+    except Exception as e:
+        sys.stderr.write(str(e))
+        sys.exit(1)
+
+asyncio.run(resolve_conflict())
+`;
+
+            // Run AI resolution
+            const childResult = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
+              const child = spawn(pythonCommand, [...pythonBaseArgs, '-c', script], {
+                cwd: autoBuildSource,
+                env: { ...process.env, ...pythonEnv, ...profileEnv, PYTHONUNBUFFERED: '1', PYTHONUTF8: '1' }
+              });
+
+              let stdout = '';
+              let stderr = '';
+              child.stdout.on('data', d => stdout += d.toString());
+              child.stderr.on('data', d => stderr += d.toString());
+              child.on('close', code => resolve({ stdout, stderr, code }));
+            });
+
+            if (childResult.code === 0 && childResult.stdout.trim()) {
+              // Write back resolved content
+              // Clean up any potential markdown block markers if strict prompt failed
+              let resolvedContent = childResult.stdout;
+              if (resolvedContent.startsWith('```') && resolvedContent.endsWith('```')) {
+                const lines = resolvedContent.split('\n');
+                resolvedContent = lines.slice(1, -1).join('\n');
+              } else if (resolvedContent.startsWith('```')) { // sometimes just starts with it
+                resolvedContent = resolvedContent.replace(/^```[a-z]*\n/, '').replace(/\n```$/, '');
+              }
+
+              const { promises: fsPromises } = require('fs');
+              await fsPromises.writeFile(filePath, resolvedContent);
+
+              // Stage the file
+              execFileSync(getToolPath('git'), ['add', file], { cwd: project.path });
+              resolved.push(file);
+              console.warn('[RESOLVE] Resolved conflict for:', file);
+            } else {
+              console.error('[RESOLVE] Failed to resolve:', file, childResult.stderr);
+              failed.push(file);
+            }
+
+          } catch (err) {
+            console.error('[RESOLVE] Error processing file:', file, err);
+            failed.push(file);
+          }
+        }
+
+        return { success: true, data: { resolved, failed } };
+
+      } catch (error) {
+        console.error('[IPC] TASK_WORKTREE_RESOLVE_CONFLICTS error:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      }
+    }
+  );
+
   ipcMain.handle(
     IPC_CHANNELS.TASK_WORKTREE_DISCARD,
     async (_, taskId: string, skipStatusChange?: boolean): Promise<IPCResult<WorktreeDiscardResult>> => {

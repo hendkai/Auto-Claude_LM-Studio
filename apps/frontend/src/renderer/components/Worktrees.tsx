@@ -16,7 +16,8 @@ import {
   ChevronRight,
   Check,
   X,
-  Terminal
+  Terminal,
+  Wand2
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -68,6 +69,7 @@ export function Worktrees({ projectId }: WorktreesProps) {
   const [showMergeDialog, setShowMergeDialog] = useState(false);
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeListItem | null>(null);
   const [isMerging, setIsMerging] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
   const [mergeResult, setMergeResult] = useState<WorktreeMergeResult | null>(null);
 
   // Delete confirmation state
@@ -240,6 +242,41 @@ export function Worktrees({ projectId }: WorktreesProps) {
   };
 
   // Open merge dialog
+  const handleResolveConflicts = async () => {
+    if (!selectedWorktree || !mergeResult?.conflictFiles) return;
+
+    setIsResolving(true);
+    try {
+      const task = findTaskForWorktree(selectedWorktree.specName);
+      if (!task) throw new Error('Task not found');
+
+      const result = await window.electronAPI.resolveWorktreeConflicts(task.id, mergeResult.conflictFiles);
+      if (result.success && result.data) {
+        const { resolved, failed } = result.data;
+        if (failed.length === 0) {
+          // All resolved!
+          setMergeResult({
+            success: false, // Still not merged, but resolved
+            message: 'Conflicts resolved! You can now merge.',
+            conflictFiles: []
+          });
+        } else {
+          setMergeResult({
+            ...mergeResult,
+            message: `Resolved ${resolved.length} files. Failed: ${failed.join(', ')}`,
+            conflictFiles: failed
+          });
+        }
+      } else {
+        setError(result.error || 'Failed to resolve conflicts');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resolve conflicts');
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
   const openMergeDialog = (worktree: WorktreeListItem) => {
     setSelectedWorktree(worktree);
     setMergeResult(null);
@@ -767,6 +804,27 @@ export function Worktrees({ projectId }: WorktreesProps) {
                             <li key={file} className="font-mono">{file}</li>
                           ))}
                         </ul>
+                        <div className="mt-3">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="w-full gap-2"
+                            onClick={handleResolveConflicts}
+                            disabled={isResolving}
+                          >
+                            {isResolving ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                Resolving with AI...
+                              </>
+                            ) : (
+                              <>
+                                <Wand2 className="h-3.5 w-3.5" />
+                                Resolve with AI
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>

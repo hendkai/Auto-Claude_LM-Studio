@@ -70,6 +70,11 @@ export const workspaceMock = {
     }
   }),
 
+  resolveWorktreeConflicts: async (taskId: string, files?: string[]) => ({
+    success: true,
+    data: { resolved: files || [], failed: [] }
+  }),
+
   clearStagedState: async () => ({
     success: true,
     data: { cleared: true }
