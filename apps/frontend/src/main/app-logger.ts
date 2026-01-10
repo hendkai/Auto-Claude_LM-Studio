@@ -36,7 +36,8 @@ log.transports.file.fileName = 'main.log';
 // by renaming old files to .old format. Custom implementations were problematic.
 
 // Console transport - always show warnings and errors, debug only in dev mode
-log.transports.console.level = process.env.NODE_ENV === 'development' ? 'debug' : 'warn';
+// FIX: Disable console logging in packaged builds to prevent EPIPE errors causing crash loops
+log.transports.console.level = app.isPackaged ? false : (process.env.NODE_ENV === 'development' ? 'debug' : 'warn');
 log.transports.console.format = '[{h}:{i}:{s}] [{level}] {text}';
 
 // Determine if this is a beta version
