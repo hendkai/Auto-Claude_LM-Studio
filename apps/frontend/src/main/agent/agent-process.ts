@@ -830,30 +830,60 @@ export class AgentProcessManager {
   /**
    * Kill a specific task's process
    */
-  killProcess(taskId: string): boolean {
-    const agentProcess = this.state.getProcess(taskId);
-    if (agentProcess) {
+  /**
+   * Kill a specific task's process
+   */
+  killProcess(taskId: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const agentProcess = this.state.getProcess(taskId);
+      if (!agentProcess) {
+        resolve(false);
+        return;
+      }
+
       try {
         // Mark this specific spawn as killed so its exit handler knows to ignore
         this.state.markSpawnAsKilled(agentProcess.spawnId);
 
+        if (agentProcess.process.killed) {
+          this.state.deleteProcess(taskId);
+          resolve(true);
+          return;
+        }
+
+        // Setup exit listener for cleanup
+        const cleanup = () => {
+          this.state.deleteProcess(taskId);
+          resolve(true);
+        };
+
+        // Listen for exit to resolve promise
+        agentProcess.process.once('exit', cleanup);
+        agentProcess.process.once('error', cleanup);
+
         // Send SIGTERM first for graceful shutdown
         agentProcess.process.kill('SIGTERM');
 
-        // Force kill after timeout
+        // Force kill after timeout if it doesn't exit
         setTimeout(() => {
           if (!agentProcess.process.killed) {
+            console.log('[AgentProcess] Force killing stuck process for task:', taskId);
             agentProcess.process.kill('SIGKILL');
+            // We resolve in the exit handler which should fire after SIGKILL
+            // But just in case it doesn't fire for some reason (zombie process), we cleanup here too
+            setTimeout(() => {
+              if (this.state.getProcess(taskId)) {
+                cleanup();
+              }
+            }, 500);
           }
         }, 5000);
 
-        this.state.deleteProcess(taskId);
-        return true;
-      } catch {
-        return false;
+      } catch (error) {
+        console.error('[AgentProcess] Error killing process:', error);
+        resolve(false);
       }
-    }
-    return false;
+    });
   }
 
   /**

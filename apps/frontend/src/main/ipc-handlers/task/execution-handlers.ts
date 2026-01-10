@@ -260,13 +260,14 @@ export function registerTaskExecutionHandlers(
   /**
    * Stop a task
    */
-  ipcMain.on(IPC_CHANNELS.TASK_STOP, (_, taskId: string) => {
+  /**
+   * Stop a task
+   */
+  ipcMain.on(IPC_CHANNELS.TASK_STOP, async (_, taskId: string) => {
     const DEBUG = process.env.DEBUG === 'true';
 
-    agentManager.killTask(taskId);
-    fileWatcher.unwatch(taskId);
-
-    // Notify status change IMMEDIATELY for instant UI feedback
+    // Notify status change IMMEDIATELY for instant UI feedback (Optimistic Update)
+    // We do this BEFORE killing the process to keep the UI snappy
     const ipcSentAt = Date.now();
     const mainWindow = getMainWindow();
     if (mainWindow) {
@@ -278,34 +279,38 @@ export function registerTaskExecutionHandlers(
     }
 
     if (DEBUG) {
-      console.log(`[TASK_STOP] IPC sent immediately for task ${taskId}, deferring file persistence`);
+      console.log(`[TASK_STOP] IPC sent immediately for task ${taskId}, proceeding with termination`);
     }
 
-    // Find task and project to update the plan file (async, non-blocking)
+    try {
+      // Cleanup process and watchers
+      await agentManager.killTask(taskId);
+      await fileWatcher.unwatch(taskId);
+    } catch (error) {
+      console.error('[TASK_STOP] Error stopping task:', error);
+    }
+
+    // Find task and project to update the plan file
     const { task, project } = findTaskAndProject(taskId);
 
     if (task && project) {
-      // Persist status to implementation_plan.json to prevent status flip-flop on refresh
-      // Uses shared utility for consistency with agent-events-handlers.ts
-      // NOTE: This is now async and non-blocking for better UI responsiveness
+      // Persist status to implementation_plan.json
+      // We do this AFTER killing to ensure no race conditions with the process writing to the file
       const planPath = getPlanPath(project, task);
-      setImmediate(async () => {
+      try {
         const persistStart = Date.now();
-        try {
-          const persisted = await persistPlanStatus(planPath, 'backlog', project.id);
-          if (persisted) {
-            console.warn('[TASK_STOP] Updated plan status to backlog');
-          }
-          if (DEBUG) {
-            const delay = persistStart - ipcSentAt;
-            const duration = Date.now() - persistStart;
-            console.log(`[TASK_STOP] File persistence: delayed ${delay}ms after IPC, completed in ${duration} ms`);
-          }
-        } catch (err) {
-          console.error('[TASK_STOP] Failed to persist plan status:', err);
+        const persisted = await persistPlanStatus(planPath, 'backlog', project.id);
+        if (persisted) {
+          console.warn('[TASK_STOP] Updated plan status to backlog');
         }
-      });
-      // Note: File not found is expected for tasks without a plan file (persistPlanStatus handles ENOENT)
+        if (DEBUG) {
+          const delay = persistStart - ipcSentAt;
+          const duration = Date.now() - persistStart;
+          console.log(`[TASK_STOP] File persistence: started ${delay}ms after IPC, completed in ${duration} ms`);
+        }
+      } catch (err) {
+        console.error('[TASK_STOP] Failed to persist plan status:', err);
+      }
     }
   });
 
@@ -533,11 +538,11 @@ export function registerTaskExecutionHandlers(
             //    while we represent the authoritative state change here
             agentManager.setIgnoreExit(taskId, true);
 
-            agentManager.killTask(taskId);
+            console.log('[TASK_UPDATE_STATUS] Awaiting task termination...');
+            const killed = await agentManager.killTask(taskId);
+            console.log(`[TASK_UPDATE_STATUS] Task termination result: ${killed}`);
 
-            // Give the process a moment to release file handles/locks
-            console.debug('[TASK_UPDATE_STATUS] Waiting 200ms for process to cleanup...');
-            await new Promise(resolve => setTimeout(resolve, 200));
+            // No need for arbitrary delay anymore as killTask is async and waits for exit
           } catch (killError) {
             console.error('[TASK_UPDATE_STATUS] Failed to kill task:', killError);
             // Reset the ignore flag on error

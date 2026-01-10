@@ -313,8 +313,11 @@ export class AgentManager extends EventEmitter {
   /**
    * Kill a specific task's process
    */
-  killTask(taskId: string): boolean {
-    return this.processManager.killProcess(taskId);
+  /**
+   * Kill a specific task's process
+   */
+  async killTask(taskId: string): Promise<boolean> {
+    return await this.processManager.killProcess(taskId);
   }
 
   /**

@@ -214,8 +214,7 @@
       "icon": "resources/icons",
       "target": [
         "AppImage",
-        "deb",
-        "flatpak"
+        "deb"
       ],
       "category": "Development"
     },
