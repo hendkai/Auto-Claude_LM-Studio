@@ -2350,12 +2350,27 @@ export function registerWorktreeHandlers(
               const hasConflicts = conflictPatterns.some(pattern => pattern.test(combinedOutput));
               debug('Merge failed. hasConflicts:', hasConflicts);
 
+              let conflictFiles: string[] = [];
+              if (hasConflicts) {
+                try {
+                  // Get list of conflicting files
+                  const gitConflicted = execFileSync(getToolPath('git'), ['diff', '--name-only', '--diff-filter=U'], {
+                    cwd: project.path,
+                    encoding: 'utf-8'
+                  });
+                  conflictFiles = gitConflicted.split('\n').map(f => f.trim()).filter(f => f);
+                  debug('Identified conflict files:', conflictFiles);
+                } catch (e) {
+                  debug('Failed to identify conflict files:', e);
+                }
+              }
+
               resolve({
                 success: true,
                 data: {
                   success: false,
                   message: hasConflicts ? 'Merge conflicts detected' : `Merge failed: ${stderr || stdout}`,
-                  conflictFiles: hasConflicts ? [] : undefined
+                  conflictFiles: conflictFiles.length > 0 ? conflictFiles : undefined
                 }
               });
             }
