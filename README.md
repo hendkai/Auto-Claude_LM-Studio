@@ -1,32 +1,53 @@
-# Auto Claude - LM Studio Development Fork
+# Auto Claude - Custom Fork with Local LLM Support
 
-**Autonomous multi-agent coding framework with local LLM support via LiteLLM**
+> [!IMPORTANT]
+> **This is NOT the original Auto-Claude repository!**  
+> This is a community fork with enhanced features for custom AI providers and local LLM support.
+> 
+> **Original repository:** [AndyMik90/Auto-Claude](https://github.com/AndyMik90/Auto-Claude)  
+> **For official support and stable releases**, please visit the original repo.
+
+---
+
+## 🎯 Fork Features
+
+This fork extends Auto-Claude with powerful customization options:
+
+### 🤖 **Custom AI Provider Support**
+- **LM Studio Integration** - Run local models on your own hardware
+- **LiteLLM Proxy** - Connect to any LLM provider (Ollama, OpenAI-compatible endpoints, etc.)
+- **No API Costs** - Use completely free local models
+- **Privacy First** - Keep your code on your machine
+
+### ✨ **Additional Enhancements**
+- **Flexible Model Configuration** - Mix and match providers per project
+- **Local Network Sync** - Sync tasks between Auto-Claude instances
+- **Development-First** - Latest experimental features from the community
+
+> **💡 Want official support?** Use the [original Auto-Claude repository](https://github.com/AndyMik90/Auto-Claude)  
+> **💡 Want local LLMs?** You're in the right place! See [LiteLLM Setup Guide](guides/LITELLM-SETUP.md)
+
+---
 
 ![Auto Claude Kanban Board](.github/assets/Auto-Claude-Kanban.png)
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-green?style=flat-square)](./agpl-3.0.txt)
-[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/KCXaPBr4Dj)
-[![YouTube](https://img.shields.io/badge/YouTube-Subscribe-FF0000?style=flat-square&logo=youtube&logoColor=white)](https://www.youtube.com/@AndreMikalsen)
-[![CI](https://img.shields.io/github/actions/workflow/status/AndyMik90/Auto-Claude/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/AndyMik90/Auto-Claude/actions)
-
----
-
-> [!WARNING]
-> **This is a development fork!** This branch contains experimental features (LiteLLM support, local LLM integration) and may be unstable.
-> 
-> **For stable releases**, please visit the original repository:  
-> 🔗 **[AndyMik90/Auto-Claude](https://github.com/AndyMik90/Auto-Claude)**
 
 ---
 
 ## Requirements
 
-- **Claude Pro/Max subscription** - [Get one here](https://claude.ai/upgrade)
-  - **OR** Use a local LLM via LiteLLM proxy - [Setup guide](guides/LITELLM-SETUP.md)
+**Choose your AI provider:**
+- **🏠 Local LLMs** (Recommended for this fork) - [Setup guide](guides/LITELLM-SETUP.md)
+  - LM Studio, Ollama, or any OpenAI-compatible endpoint
+  - No subscription costs, complete privacy
+- **☁️ Claude API** - [Claude Pro/Max subscription](https://claude.ai/upgrade) (official method)
+
+**Additional requirements:**
 - **Claude Code CLI** - `npm install -g @anthropic-ai/claude-code`
 - **Git repository** - Your project must be initialized as a git repo
 
-> **💡 Running Local LLMs?** Auto Claude now supports local models (LM Studio, Ollama, etc.) via [LiteLLM proxy](guides/LITELLM-SETUP.md). No API costs required!
+> **💡 This fork specializes in local LLM support!** Follow the [LiteLLM Setup Guide](guides/LITELLM-SETUP.md) to use LM Studio, Ollama, or any custom provider.
 
 ---
 
@@ -213,10 +234,4 @@ Auto Claude is free to use. If you modify and distribute it, or run it as a serv
 
 Commercial licensing available for closed-source use cases.
 
----
 
-## Star History
-
-[![GitHub Repo stars](https://img.shields.io/github/stars/AndyMik90/Auto-Claude?style=social)](https://github.com/AndyMik90/Auto-Claude/stargazers)
-
-[![Star History Chart](https://api.star-history.com/svg?repos=AndyMik90/Auto-Claude&type=Date)](https://star-history.com/#AndyMik90/Auto-Claude&Date)
