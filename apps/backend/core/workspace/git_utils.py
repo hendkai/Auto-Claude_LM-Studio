@@ -303,10 +303,43 @@ def get_merge_base(project_dir: Path, ref1: str, ref2: str) -> str | None:
     return None
 
 
-def has_uncommitted_changes(project_dir: Path) -> bool:
-    """Check if user has unsaved work."""
+def has_uncommitted_changes(project_dir: Path, exclude_auto_claude: bool = True) -> bool:
+    """
+    Check if user has unsaved work.
+    
+    Args:
+        project_dir: Project directory
+        exclude_auto_claude: If True, ignore changes in .auto-claude directory
+        
+    Returns:
+        True if there are uncommitted changes
+    """
     result = run_git(["status", "--porcelain"], cwd=project_dir)
-    return bool(result.stdout.strip())
+    stdout = result.stdout.strip()
+    if not stdout:
+        return False
+        
+    if not exclude_auto_claude:
+        return True
+        
+    # Check if all changes are in .auto-claude
+    lines = stdout.split('\n')
+    for line in lines:
+        if len(line) < 4:
+            continue
+            
+        # Extract path (XY PATH) - v1 porcelain format
+        # first 3 chars are status+space
+        file_path = line[3:].strip()
+        
+        # Handle quoted paths (if git config set to quote)
+        if file_path.startswith('"') and file_path.endswith('"'):
+            file_path = file_path[1:-1]
+            
+        if not _is_auto_claude_file(file_path):
+            return True # Found a non-auto-claude change
+            
+    return False # All changes were auto-claude
 
 
 def get_current_branch(project_dir: Path) -> str:

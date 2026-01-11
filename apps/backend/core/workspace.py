@@ -183,6 +183,17 @@ def merge_existing_build(
         print(highlight(f"  python auto-claude/run.py --spec {spec_name}"))
         return False
 
+    # Safety check: Don't merge if project has uncommitted changes
+    # This prevents overwriting user work and confusing conflict errors
+    if has_uncommitted_changes(project_dir):
+        print()
+        print_status("Cannot merge: You have uncommitted changes in your main project.", "error")
+        print(muted("Please stash or commit your changes before merging to avoid data loss."))
+        print(muted("  git add . && git commit -m 'Save work'"))
+        print(muted("  # OR"))
+        print(muted("  git stash"))
+        return False
+
     # Detect current branch - this is where user wants changes merged
     # Normal workflow: user is on their feature branch (e.g., version/2.5.5)
     # and wants to merge the spec changes into it, then PR to main
