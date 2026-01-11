@@ -184,16 +184,32 @@ def merge_existing_build(
         print(highlight(f"  python auto-claude/run.py --spec {spec_name}"))
         return False
 
-    # Safety check: Don't merge if project has uncommitted changes
-    # This prevents overwriting user work and confusing conflict errors
+    # Auto-Stash: Handle uncommitted changes to prevent merge blocks
+    stashed_changes = False
     if has_uncommitted_changes(project_dir):
         print()
-        print_status("Cannot merge: You have uncommitted changes in your main project.", "error")
-        print(muted("Please stash or commit your changes before merging to avoid data loss."))
-        print(muted("  git add . && git commit -m 'Save work'"))
-        print(muted("  # OR"))
-        print(muted("  git stash"))
-        return False
+        print_status("Uncommitted changes detected in main project.", "warning")
+        print(muted("Auto-stashing changes to allow merge..."))
+        
+        try:
+            # Stash changes with a descriptive message
+            stash_res = subprocess.run(
+                ["git", "stash", "push", "-m", f"Auto-Stash: Pre-AI Merge ({spec_name})"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True
+            )
+            
+            if stash_res.returncode == 0:
+                print(success("✓ Changes stashed successfully"))
+                stashed_changes = True
+            else:
+                print(error(f"✗ Failed to stash changes: {stash_res.stderr}"))
+                return False
+                
+        except Exception as e:
+            print(error(f"✗ Failed to stash changes: {e}"))
+            return False
 
     # Detect current branch - this is where user wants changes merged
     # Normal workflow: user is on their feature branch (e.g., version/2.5.5)
@@ -328,6 +344,27 @@ def merge_existing_build(
     success_result = manager.merge_worktree(
         spec_name, delete_after=not no_commit, no_commit=no_commit
     )
+    
+    # Restore stashed changes if any
+    if stashed_changes:
+        print()
+        print(muted("Restoring stashed changes..."))
+        try:
+            pop_res = subprocess.run(
+                ["git", "stash", "pop"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True
+            )
+            if pop_res.returncode == 0:
+                print(success("✓ Stashed changes restored"))
+            else:
+                print(warning("⚠ Could not restore stashed changes automatically due to conflicts."))
+                print(muted("Your changes are saved in the stash list."))
+                print(muted(f"Run 'git stash pop' manually to resolve conflicts."))
+                print(muted(f"Error: {pop_res.stderr.strip()}"))
+        except Exception as e:
+            print(error(f"✗ Failed to pop stash: {e}"))
 
     if success_result:
         print()
