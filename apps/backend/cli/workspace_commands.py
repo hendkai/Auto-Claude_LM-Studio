@@ -942,8 +942,7 @@ def handle_merge_preview_command(
             "files": all_changed_files,
             "conflicts": conflicts,
             "gitConflicts": {
-                "hasConflicts": git_conflicts["has_conflicts"]
-                and len(non_lock_conflicting_files) > 0,
+                "hasConflicts": git_conflicts["has_conflicts"],
                 "conflictingFiles": non_lock_conflicting_files,
                 "needsRebase": git_conflicts["needs_rebase"],
                 "commitsBehind": git_conflicts["commits_behind"],
@@ -959,8 +958,7 @@ def handle_merge_preview_command(
                 "conflictFiles": conflict_files,
                 "totalConflicts": total_conflicts,
                 "autoMergeable": 0,  # Not tracking auto-merge in lightweight mode
-                "hasGitConflicts": git_conflicts["has_conflicts"]
-                and len(non_lock_conflicting_files) > 0,
+                "hasGitConflicts": git_conflicts["has_conflicts"],
                 # Include path-mapped AI merge count for UI display
                 "pathMappedAIMergeCount": len(path_mapped_ai_merges),
             },
