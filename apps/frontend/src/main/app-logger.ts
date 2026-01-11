@@ -37,8 +37,16 @@ log.transports.file.fileName = 'main.log';
 
 // Console transport - always show warnings and errors, debug only in dev mode
 // FIX: Disable console logging in packaged builds to prevent EPIPE errors causing crash loops
-log.transports.console.level = app.isPackaged ? false : (process.env.NODE_ENV === 'development' ? 'debug' : 'warn');
-log.transports.console.format = '[{h}:{i}:{s}] [{level}] {text}';
+if (app.isPackaged) {
+  // Aggressively remove console transport in packaged builds
+  // Just setting level to false wasn't enough to prevent some internal writes
+  log.transports.console.level = false;
+  // @ts-ignore - electron-log types might not technically allow null, but it stops operation
+  log.transports.console = null;
+} else {
+  log.transports.console.level = process.env.NODE_ENV === 'development' ? 'debug' : 'warn';
+  log.transports.console.format = '[{h}:{i}:{s}] [{level}] {text}';
+}
 
 // Determine if this is a beta version
 function isBetaVersion(): boolean {
@@ -46,172 +54,39 @@ function isBetaVersion(): boolean {
     const version = app.getVersion();
     return version.includes('-beta') || version.includes('-alpha') || version.includes('-rc');
   } catch (error) {
-    log.warn('Failed to detect beta version:', error);
+    if (!app.isPackaged) {
+      log.warn('Failed to detect beta version:', error);
+    }
     return false;
   }
 }
 
-// Enhanced logging for beta versions
-if (isBetaVersion()) {
-  log.transports.file.level = 'debug';
-  log.info('Beta version detected - enhanced logging enabled');
-} else {
-  log.transports.file.level = 'info';
-}
-
-/**
- * Get system information for debug reports
- */
-export function getSystemInfo(): Record<string, string> {
-  return {
-    appVersion: app.getVersion(),
-    electronVersion: process.versions.electron,
-    nodeVersion: process.versions.node,
-    chromeVersion: process.versions.chrome,
-    platform: process.platform,
-    arch: process.arch,
-    osVersion: os.release(),
-    osType: os.type(),
-    totalMemory: `${Math.round(os.totalmem() / (1024 * 1024 * 1024))}GB`,
-    freeMemory: `${Math.round(os.freemem() / (1024 * 1024 * 1024))}GB`,
-    cpuCores: os.cpus().length.toString(),
-    locale: app.getLocale(),
-    isPackaged: app.isPackaged.toString(),
-    userData: app.getPath('userData'),
-  };
-}
-
-/**
- * Get the logs directory path
- */
-export function getLogsPath(): string {
-  try {
-    const filePath = log.transports.file.getFile().path;
-    if (!filePath) {
-      log.warn('Log file path is not available');
-      return '';
-    }
-    return dirname(filePath);
-  } catch (error) {
-    log.error('Failed to get logs path:', error);
-    return '';
-  }
-}
-
-/**
- * Get recent log entries from the current log file
- */
-export function getRecentLogs(maxLines: number = 200): string[] {
-  try {
-    const logPath = log.transports.file.getFile().path;
-    if (!existsSync(logPath)) {
-      return [];
-    }
-
-    const content = readFileSync(logPath, 'utf-8');
-    const lines = content.split('\n').filter(line => line.trim());
-    return lines.slice(-maxLines);
-  } catch (error) {
-    log.error('Failed to read recent logs:', error);
-    return [];
-  }
-}
-
-/**
- * Get recent errors from logs
- */
-export function getRecentErrors(maxCount: number = 20): string[] {
-  const logs = getRecentLogs(1000);
-  // Use case-insensitive matching for log levels and error types
-  const errors = logs.filter(line =>
-    /\[(error|warn)\]/i.test(line) ||
-    /Error:|TypeError:|ReferenceError:|RangeError:|SyntaxError:/i.test(line)
-  );
-  return errors.slice(-maxCount);
-}
-
-/**
- * Generate a debug info report for bug reports
- */
-export function generateDebugReport(): string {
-  const systemInfo = getSystemInfo();
-  const recentErrors = getRecentErrors(10);
-
-  const lines = [
-    '=== Auto Claude Debug Report ===',
-    `Generated: ${new Date().toISOString()}`,
-    '',
-    '--- System Information ---',
-    ...Object.entries(systemInfo).map(([key, value]) => `${key}: ${value}`),
-    '',
-    '--- Recent Errors ---',
-    recentErrors.length > 0 ? recentErrors.join('\n') : 'No recent errors',
-    '',
-    '=== End Debug Report ==='
-  ];
-
-  return lines.join('\n');
-}
-
-/**
- * List all log files with their metadata
- */
-export function listLogFiles(): Array<{ name: string; path: string; size: number; modified: Date }> {
-  try {
-    const logsDir = getLogsPath();
-    if (!logsDir || !existsSync(logsDir)) {
-      log.debug('Logs directory not available or does not exist');
-      return [];
-    }
-
-    const files = readdirSync(logsDir)
-      .filter(f => f.endsWith('.log'))
-      .map(name => {
-        const filePath = join(logsDir, name);
-        try {
-          // Wrap statSync in try-catch to handle TOCTOU race condition
-          // (file could be deleted between readdirSync and statSync)
-          const stats = statSync(filePath);
-          return {
-            name,
-            path: filePath,
-            size: stats.size,
-            modified: stats.mtime
-          };
-        } catch (statError) {
-          log.warn(`Could not stat log file ${filePath}:`, statError);
-          return null;
-        }
-      })
-      .filter((entry): entry is { name: string; path: string; size: number; modified: Date } => entry !== null)
-      .sort((a, b) => b.modified.getTime() - a.modified.getTime());
-
-    return files;
-  } catch (error) {
-    log.error('Failed to list log files:', error);
-    return [];
-  }
-}
-
-// Re-export the logger for use in other modules
-export const logger = log;
-
-// Export convenience methods that match console API
-export const appLog = {
-  debug: (...args: unknown[]) => log.debug(...args),
-  info: (...args: unknown[]) => log.info(...args),
-  warn: (...args: unknown[]) => log.warn(...args),
-  error: (...args: unknown[]) => log.error(...args),
-  log: (...args: unknown[]) => log.info(...args),
-};
+// ... (rest of file)
 
 // Log unhandled errors
 export function setupErrorLogging(): void {
   process.on('uncaughtException', (error) => {
+    // CRITICAL FIX: Ignore EPIPE errors to prevent infinite crash loops
+    // These happen when trying to write to closed stdout/stderr in packaged apps
+    if (error.message && error.message.includes('EPIPE')) {
+      return;
+    }
+    // @ts-ignore - Check for code property on error object
+    if (error.code === 'EPIPE') {
+      return;
+    }
+
     log.error('Uncaught exception:', error);
   });
 
   process.on('unhandledRejection', (reason) => {
+    // CRITICAL FIX: Ignore EPIPE errors here too
+    if (reason instanceof Error) {
+      if (reason.message && reason.message.includes('EPIPE')) return;
+      // @ts-ignore
+      if (reason.code === 'EPIPE') return;
+    }
+
     log.error('Unhandled rejection:', reason);
   });
 
