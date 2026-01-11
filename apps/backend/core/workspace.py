@@ -107,6 +107,7 @@ from core.workspace.git_utils import (
 )
 from core.workspace.git_utils import (
     validate_merged_syntax as _validate_merged_syntax,
+    has_uncommitted_changes,
 )
 
 # Import from refactored modules in core/workspace/
