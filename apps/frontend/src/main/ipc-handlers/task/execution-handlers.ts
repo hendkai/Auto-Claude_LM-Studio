@@ -519,33 +519,33 @@ export function registerTaskExecutionHandlers(
         // Auto-stop task when status changes AWAY from 'in_progress' and process IS running
         // This handles the case where user drags a running task back to Planning/backlog
         // CRITICAL: Stop the task BEFORE persisting the new status to prevent race conditions
-        // where the running process (or file watcher) reacts to the status change while still running.
         if (status !== 'in_progress' && agentManager.isRunning(taskId)) {
           console.warn('[TASK_UPDATE_STATUS] Stopping task due to status change away from in_progress:', taskId);
 
+          // Force unwatch first to stop incoming progress events
           try {
-            // Prevent race condition causing crash (simultaneous file access/event handling):
-            // 1. Unwatch immediately to prevent "progress" events from file updates
             await fileWatcher.unwatch(taskId);
           } catch (unwatchError) {
             console.error('[TASK_UPDATE_STATUS] Failed to unwatch file watcher:', unwatchError);
-            // Continue anyway - this shouldn't prevent status update
           }
 
           try {
-            // 2. Tell agent manager to ignore the "exit" event for this specific kill
-            //    This prevents the exit handler from satisfying "on exit" logic (persistence)
-            //    while we represent the authoritative state change here
+            // Tell agent manager to ignore the "exit" event for this specific kill
             agentManager.setIgnoreExit(taskId, true);
 
             console.log('[TASK_UPDATE_STATUS] Awaiting task termination...');
             const killed = await agentManager.killTask(taskId);
             console.log(`[TASK_UPDATE_STATUS] Task termination result: ${killed}`);
 
-            // No need for arbitrary delay anymore as killTask is async and waits for exit
+            // If killTask returned false (process wasn't running), the exit handler won't fire.
+            // We must manually reset the flag to prevent it from leaking to the next run.
+            if (!killed) {
+              console.warn('[TASK_UPDATE_STATUS] Task was not running, resetting ignore flag manually');
+              agentManager.setIgnoreExit(taskId, false);
+            }
           } catch (killError) {
             console.error('[TASK_UPDATE_STATUS] Failed to kill task:', killError);
-            // Reset the ignore flag on error
+            // Ensure flag is reset on error
             try {
               agentManager.setIgnoreExit(taskId, false);
             } catch { }

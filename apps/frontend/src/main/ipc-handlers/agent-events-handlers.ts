@@ -195,109 +195,80 @@ export function registerAgenteventsHandlers(
           }
         }
 
-        for (const p of projects) {
-          try {
-            const tasks = projectStore.getTasks(p.id);
-            task = tasks.find((t) => t.id === taskId || t.specId === taskId);
-            if (task) {
-              project = p;
-              break;
-            }
-          } catch (getTasksError) {
-            console.error(`[Task ${taskId}] Failed to get tasks for project ${p.id}:`, getTasksError);
-          }
+        // Use helper to safely find task and project
+        const found = findTaskAndProject(taskId);
+        task = found.task;
+        project = found.project;
+
+        if (!task || !project) {
+          console.warn(`[Task ${taskId}] Exit handler: Task or project not found after process exit (Project found: ${!!project})`);
+          return;
         }
 
-        if (task && project) {
-          const taskTitle = task.title || task.specId;
-          const mainPlanPath = getPlanPath(project, task);
-          const projectId = project.id; // Capture for closure
+        const taskTitle = task.title || task.specId;
+        const mainPlanPath = getPlanPath(project, task);
+        const projectId = project.id; // Capture for closure
 
-          // Capture task values for closure
-          const taskSpecId = task.specId;
-          const projectPath = project.path;
-          const autoBuildPath = project.autoBuildPath;
+        // Capture task values for closure
+        const taskSpecId = task.specId;
+        const projectPath = project.path;
+        const autoBuildPath = project.autoBuildPath;
 
-          // Use shared utility for persisting status (prevents race conditions)
-          // Persist to both main project AND worktree (if exists) for consistency
-          const persistStatus = async (status: TaskStatus) => {
-            try {
-              // Persist to main project
-              // Use async persistPlanStatus which uses locks, preventing race conditions with TASK_UPDATE_STATUS
-              const mainPersisted = await persistPlanStatus(mainPlanPath, status, projectId);
-              if (mainPersisted) {
-                console.warn(`[Task ${taskId}] Persisted status to main plan: ${status}`);
+        // Use shared utility for persisting status (prevents race conditions)
+        // Persist to both main project AND worktree (if exists) for consistency
+        const persistStatus = async (status: TaskStatus) => {
+          try {
+            // Persist to main project
+            // Use async persistPlanStatus which uses locks, preventing race conditions with TASK_UPDATE_STATUS
+            const mainPersisted = await persistPlanStatus(mainPlanPath, status, projectId);
+            if (mainPersisted) {
+              console.warn(`[Task ${taskId}] Persisted status to main plan: ${status}`);
+            }
+          } catch (mainPersistError) {
+            console.error(`[Task ${taskId}] Failed to persist status to main plan:`, mainPersistError);
+          }
+
+          try {
+            // Also persist to worktree if it exists
+            const worktreePath = findTaskWorktree(projectPath, taskSpecId);
+            if (worktreePath) {
+              const specsBaseDir = getSpecsDir(autoBuildPath);
+              const worktreePlanPath = path.join(
+                worktreePath,
+                specsBaseDir,
+                taskSpecId,
+                AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN
+              );
+              // Use EAFP instead of existsSync to avoid race conditions
+              const worktreePersisted = await persistPlanStatus(worktreePlanPath, status, projectId);
+              if (worktreePersisted) {
+                console.warn(`[Task ${taskId}] Persisted status to worktree plan: ${status}`);
               }
-            } catch (mainPersistError) {
-              console.error(`[Task ${taskId}] Failed to persist status to main plan:`, mainPersistError);
             }
+          } catch (worktreePersistError) {
+            console.error(`[Task ${taskId}] Failed to persist status to worktree plan:`, worktreePersistError);
+          }
+        };
 
-            try {
-              // Also persist to worktree if it exists
-              const worktreePath = findTaskWorktree(projectPath, taskSpecId);
-              if (worktreePath) {
-                const specsBaseDir = getSpecsDir(autoBuildPath);
-                const worktreePlanPath = path.join(
-                  worktreePath,
-                  specsBaseDir,
-                  taskSpecId,
-                  AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN
-                );
-                // Use EAFP instead of existsSync to avoid race conditions
-                const worktreePersisted = await persistPlanStatus(worktreePlanPath, status, projectId);
-                if (worktreePersisted) {
-                  console.warn(`[Task ${taskId}] Persisted status to worktree plan: ${status}`);
-                }
-              }
-            } catch (worktreePersistError) {
-              console.error(`[Task ${taskId}] Failed to persist status to worktree plan:`, worktreePersistError);
-            }
-          };
+        if (code === 0) {
+          try {
+            notificationService.notifyReviewNeeded(taskTitle, project.id, taskId);
+          } catch (notifyError) {
+            console.error(`[Task ${taskId}] Failed to send review notification:`, notifyError);
+          }
 
-          if (code === 0) {
-            try {
-              notificationService.notifyReviewNeeded(taskTitle, project.id, taskId);
-            } catch (notifyError) {
-              console.error(`[Task ${taskId}] Failed to send review notification:`, notifyError);
-            }
+          // Fallback: Ensure status is updated even if COMPLETE phase event was missed
+          // This prevents tasks from getting stuck in ai_review status
+          // FIX (ACS-71): Only move to human_review if subtasks exist AND are all completed
+          // If no subtasks exist, the task is still in planning and shouldn't move to human_review
+          const isActiveStatus = task.status === 'in_progress' || task.status === 'ai_review';
+          const hasSubtasks = task.subtasks && task.subtasks.length > 0;
+          const hasIncompleteSubtasks = hasSubtasks &&
+            task.subtasks.some((s) => s.status !== 'completed');
 
-            // Fallback: Ensure status is updated even if COMPLETE phase event was missed
-            // This prevents tasks from getting stuck in ai_review status
-            // FIX (ACS-71): Only move to human_review if subtasks exist AND are all completed
-            // If no subtasks exist, the task is still in planning and shouldn't move to human_review
-            const isActiveStatus = task.status === 'in_progress' || task.status === 'ai_review';
-            const hasSubtasks = task.subtasks && task.subtasks.length > 0;
-            const hasIncompleteSubtasks = hasSubtasks &&
-              task.subtasks.some((s) => s.status !== 'completed');
-
-            if (isActiveStatus && hasSubtasks && !hasIncompleteSubtasks) {
-              // All subtasks completed - safe to move to human_review
-              console.warn(`[Task ${taskId}] Fallback: Moving to human_review (process exited successfully, all ${task.subtasks.length} subtasks completed)`);
-              try {
-                await persistStatus('human_review');
-                // Include projectId for multi-project filtering (issue #723)
-                mainWindow.webContents.send(
-                  IPC_CHANNELS.TASK_STATUS_CHANGE,
-                  taskId,
-                  'human_review' as TaskStatus,
-                  projectId
-                );
-              } catch (statusUpdateError) {
-                console.error(`[Task ${taskId}] Failed to update status to human_review:`, statusUpdateError);
-              }
-            } else if (isActiveStatus && !hasSubtasks) {
-              // No subtasks yet - task is still in planning phase, don't change status
-              // This prevents the bug where tasks jump to human_review before planning completes
-              console.warn(`[Task ${taskId}] Process exited but no subtasks created yet - keeping current status (${task.status})`);
-            }
-          } else {
-            // Process failed (non-zero exit code)
-            try {
-              notificationService.notifyTaskFailed(taskTitle, project.id, taskId);
-            } catch (notifyError) {
-              console.error(`[Task ${taskId}] Failed to send failure notification:`, notifyError);
-            }
-
+          if (isActiveStatus && hasSubtasks && !hasIncompleteSubtasks) {
+            // All subtasks completed - safe to move to human_review
+            console.warn(`[Task ${taskId}] Fallback: Moving to human_review (process exited successfully, all ${task.subtasks.length} subtasks completed)`);
             try {
               await persistStatus('human_review');
               // Include projectId for multi-project filtering (issue #723)
@@ -308,12 +279,35 @@ export function registerAgenteventsHandlers(
                 projectId
               );
             } catch (statusUpdateError) {
-              console.error(`[Task ${taskId}] Failed to update status after failure:`, statusUpdateError);
+              console.error(`[Task ${taskId}] Failed to update status to human_review:`, statusUpdateError);
             }
+          } else if (isActiveStatus && !hasSubtasks) {
+            // No subtasks yet - task is still in planning phase, don't change status
+            // This prevents the bug where tasks jump to human_review before planning completes
+            console.warn(`[Task ${taskId}] Process exited but no subtasks created yet - keeping current status (${task.status})`);
           }
         } else {
-          console.warn(`[Task ${taskId}] Exit handler: Task or project not found after process exit`);
+          // Process failed (non-zero exit code)
+          try {
+            notificationService.notifyTaskFailed(taskTitle, project.id, taskId);
+          } catch (notifyError) {
+            console.error(`[Task ${taskId}] Failed to send failure notification:`, notifyError);
+          }
+
+          try {
+            await persistStatus('human_review');
+            // Include projectId for multi-project filtering (issue #723)
+            mainWindow.webContents.send(
+              IPC_CHANNELS.TASK_STATUS_CHANGE,
+              taskId,
+              'human_review' as TaskStatus,
+              projectId
+            );
+          } catch (statusUpdateError) {
+            console.error(`[Task ${taskId}] Failed to update status after failure:`, statusUpdateError);
+          }
         }
+
       } catch (error) {
         console.error(`[Task ${taskId}] Exit handler error in main processing:`, error);
       }
