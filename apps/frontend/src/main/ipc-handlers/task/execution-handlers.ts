@@ -541,11 +541,16 @@ export function registerTaskExecutionHandlers(
             // We must manually reset the flag to prevent it from leaking to the next run.
             if (!killed) {
               console.warn('[TASK_UPDATE_STATUS] Task was not running, resetting ignore flag manually');
-              agentManager.setIgnoreExit(taskId, false);
+              // This will be handled by the finally block now
             }
           } catch (killError) {
             console.error('[TASK_UPDATE_STATUS] Failed to kill task:', killError);
-            // Ensure flag is reset on error
+          } finally {
+            // CRITICAL: Always reset the ignore flag.
+            // If killed=true: The exit handler HAS run (or will run very soon) and swallowed the event.
+            //                 We are now ready to resume normal monitoring.
+            // If killed=false: The exit handler will NEVER run.
+            //                  We MUST reset this so the next real exit isn't ignored.
             try {
               agentManager.setIgnoreExit(taskId, false);
             } catch { }

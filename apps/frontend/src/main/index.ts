@@ -57,11 +57,20 @@ const WINDOW_SCREEN_MARGIN: number = 20;
 const DEFAULT_SCREEN_WIDTH: number = 1920;
 const DEFAULT_SCREEN_HEIGHT: number = 1080;
 
+import { fileWatcher } from './file-watcher';
+
 // Setup error logging early (captures uncaught exceptions)
 setupErrorLogging();
 
 // Initialize Sentry for error tracking (respects user's sentryEnabled setting)
 initSentryMain();
+
+// Global error handler for file watcher to prevent crashes
+// Chokidar errors can be fatal if no error listener is attached
+fileWatcher.on('error', (taskId: string, error: string) => {
+  console.error(`[Global FileWatcher Error] Task ${taskId}:`, error);
+  // Do not throw - just log to prevent main process crash
+});
 
 /**
  * Load app settings synchronously (for use during startup).
