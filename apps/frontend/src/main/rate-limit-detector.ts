@@ -25,7 +25,10 @@ const RATE_LIMIT_INDICATORS = [
   /usage\s*limit\s*exceeded/i,
   /exceeded.*rate\s*limit/i,
   /too\s*many\s*requests/i,
-  /429\s*too\s*many\s*requests/i
+  /429\s*too\s*many\s*requests/i,
+  /usage\s*limit\s*reached/i, // GLM specific
+  /error.*code.*1308/i, // GLM specific
+  /1308.*usage\s*limit\s*reached/i // GLM specific
 ];
 
 /**

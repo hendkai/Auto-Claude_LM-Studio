@@ -1004,7 +1004,17 @@ export function registerTaskExecutionHandlers(
             console.warn(`[Recovery] Auto-restarted task ${taskId}`);
           } catch (restartError) {
             console.error('Failed to auto-restart task after recovery:', restartError);
-            // Recovery succeeded but restart failed - still report success
+            // Recovery succeeded but restart failed - report this specific state
+            return {
+              success: true,
+              data: {
+                taskId,
+                recovered: true,
+                newStatus, // This is 'in_progress' because we set it above, but the process isn't running
+                message: `Task recovered but restart failed: ${restartError instanceof Error ? restartError.message : String(restartError)}`,
+                autoRestarted: false
+              }
+            };
           }
         }
 
