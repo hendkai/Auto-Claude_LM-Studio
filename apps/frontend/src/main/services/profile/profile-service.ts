@@ -562,17 +562,10 @@ export async function discoverModels(
   normalizedUrl = normalizedUrl.replace(/\/+$/, '');
 
   // Construct models endpoint URL
-  // If URL ends in /v1, append /models
-  // If URL doesn't end in /v1, try appending /v1/models (common convention) or just /models?
-  // Safest is: trust the user's base URL and append /models.
-  // But for Anthropic SDK compatibility, users might input "https://api.anthropic.com". 
-  // Anthropic API is https://api.anthropic.com/v1/models.
-  // OpenAI/LM Studio is .../v1/models.
-
-  let modelsUrl = `${normalizedUrl}/models`;
-
-  // If user entered root URL without version, help them out?
-  // But let's stick to standard behavior: Base URL is the prefix for /models.
+  // Strip any existing /v1 suffix (user might input it), then add /v1/models
+  // This ensures we always call the correct endpoint: baseUrl + /v1/models
+  normalizedUrl = normalizedUrl.replace(/\/v1\/?$/, ''); // Strip trailing /v1 if present
+  let modelsUrl = `${normalizedUrl}/v1/models`;
 
   try {
     // Prepare headers for BOTH Anthropic and OpenAI compatibility

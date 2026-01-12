@@ -68,28 +68,33 @@ async function getLocalLMStudioEnv(
     try {
         const settings = await readSettingsFile();
         // Ensure values are strings, handling undefined/null from settings
-        const baseUrl: string = (settings?.localLmStudioUrl) ? String(settings.localLmStudioUrl) : 'http://localhost:1234/v1';
+        // User provides base URL without /v1 (e.g., http://localhost:1234)
+        const rawUrl: string = (settings?.localLmStudioUrl) ? String(settings.localLmStudioUrl) : 'http://localhost:1234';
         const apiKey: string = (settings?.localLmStudioApiKey) ? String(settings.localLmStudioApiKey) : 'lm-studio';
-        const normalizedUrl = normalizeBaseUrlForSdk(baseUrl);
+
+        // Normalize and strip /v1 suffix if user accidentally included it
+        // The SDK will add /v1/messages itself
+        let normalizedUrl = normalizeBaseUrlForSdk(rawUrl);
+        normalizedUrl = normalizedUrl.replace(/\/v1\/?$/, ''); // Strip trailing /v1 if present
 
         // Env vars for OpenAI-compatible local server
-        // We set ANTHROPIC_* vars because the python script likely uses Anthropic SDK
+        // IMPORTANT: ANTHROPIC_BASE_URL should NOT include /v1 - the SDK adds it!
+        // We set ANTHROPIC_* vars because the python script uses Anthropic SDK
         // configured to point to local server.
-        // We also set OPENAI_* vars in case the runner supports OpenAI SDK directly (optional improvement)
         return {
             ANTHROPIC_BASE_URL: normalizedUrl,
             ANTHROPIC_AUTH_TOKEN: apiKey,
             ANTHROPIC_API_KEY: apiKey, // redundancy for SDKs
             ANTHROPIC_MODEL: model,
-            // Also set generic vars if helpful
+            // Also set generic vars if helpful (OpenAI SDK also adds /v1 itself)
             OPENAI_BASE_URL: normalizedUrl,
             OPENAI_API_KEY: apiKey,
         };
     } catch (err) {
         console.error('[ProfileEnv] Failed to load settings for Local LM Studio:', err);
-        // Fallback defaults
+        // Fallback defaults (without /v1 - SDK adds it)
         return {
-            ANTHROPIC_BASE_URL: 'http://localhost:1234/v1',
+            ANTHROPIC_BASE_URL: 'http://localhost:1234',
             ANTHROPIC_AUTH_TOKEN: 'lm-studio',
             ANTHROPIC_API_KEY: 'lm-studio',
             ANTHROPIC_MODEL: model
