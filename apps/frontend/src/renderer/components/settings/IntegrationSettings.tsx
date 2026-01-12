@@ -822,6 +822,90 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
           </div>
         )}
 
+        {/* Local LM Studio Section */}
+        <div className="space-y-4 pt-4 border-t border-border">
+          <div className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-muted-foreground" />
+            <h4 className="text-sm font-semibold text-foreground">Local Models (LM Studio)</h4>
+          </div>
+
+          <div className="rounded-lg bg-muted/30 border border-border p-4 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Connect to your local LM Studio instance to use offline models.
+              Ensures privacy and zero latency.
+            </p>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="localLmStudioUrl" className="text-sm font-medium">
+                  Base URL
+                </Label>
+                <Input
+                  id="localLmStudioUrl"
+                  placeholder="http://localhost:1234/v1"
+                  value={settings.localLmStudioUrl || ''}
+                  onChange={(e) =>
+                    onSettingsChange({ ...settings, localLmStudioUrl: e.target.value || undefined })
+                  }
+                  className="font-mono text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="localLmStudioApiKey" className="text-sm font-medium">
+                  API Key (Optional)
+                </Label>
+                <Input
+                  id="localLmStudioApiKey"
+                  type="password"
+                  placeholder="lm-studio"
+                  value={settings.localLmStudioApiKey || ''}
+                  onChange={(e) =>
+                    onSettingsChange({ ...settings, localLmStudioApiKey: e.target.value || undefined })
+                  }
+                  className="font-mono text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  const url = settings.localLmStudioUrl || 'http://localhost:1234/v1';
+                  const key = settings.localLmStudioApiKey || 'lm-studio';
+                  toast({ title: 'Testing connection...', description: `Connecting to ${url}` });
+                  try {
+                    const result = await window.electronAPI.discoverModels(url, key);
+                    if (result.success && result.data && result.data.models.length > 0) {
+                      toast({
+                        title: 'Connection Successful',
+                        description: `Found ${result.data.models.length} local models: ${result.data.models.map(m => m.id).join(', ')}`,
+                      });
+                    } else {
+                      toast({
+                        variant: 'destructive',
+                        title: 'Connection Failed',
+                        description: result.error || 'No models found. Is LM Studio running and server started?',
+                      });
+                    }
+                  } catch (e) {
+                    toast({
+                      variant: 'destructive',
+                      title: 'Connection Error',
+                      description: e instanceof Error ? e.message : 'Unknown error',
+                    });
+                  }
+                }}
+              >
+                <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                Test Connection & Discover Models
+              </Button>
+            </div>
+          </div>
+        </div>
+
         {/* API Keys Section */}
         <div className="space-y-4 pt-4 border-t border-border">
           <div className="flex items-center gap-2">

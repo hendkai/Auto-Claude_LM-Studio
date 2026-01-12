@@ -299,6 +299,9 @@ export interface AppSettings {
   // Agent Memory Access (MCP) - app-wide defaults
   graphitiMcpEnabled?: boolean;
   graphitiMcpUrl?: string;
+  // Local LM Studio Configuration
+  localLmStudioUrl?: string; // e.g. http://localhost:1234/v1
+  localLmStudioApiKey?: string;
   // Onboarding wizard completion state
   onboardingCompleted?: boolean;
   // Selected agent profile for preset model/thinking configurations

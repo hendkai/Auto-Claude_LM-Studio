@@ -53,7 +53,7 @@ export function MultiProfileModelSelect({
     className
 }: MultiProfileModelSelectProps) {
     const { t } = useTranslation();
-    const { profiles, discoverModels } = useSettingsStore();
+    const { profiles, discoverModels, settings } = useSettingsStore();
 
     // Dropdown state
     const [isOpen, setIsOpen] = useState(false);
@@ -101,12 +101,11 @@ export function MultiProfileModelSelect({
         // Helper for local LM Studio detection
         const fetchLocalLMStudioModels = async () => {
             try {
-                // Try standard LM Studio port
-                const models = await discoverModels(
-                    'http://localhost:1234/v1',
-                    'lm-studio', // Standard dummy key for LM Studio
-                    undefined
-                );
+                // Use configured URL or default
+                const url = settings.localLmStudioUrl || 'http://localhost:1234/v1';
+                const key = settings.localLmStudioApiKey || 'lm-studio';
+
+                const models = await discoverModels(url, key, undefined);
 
                 if (models && Array.isArray(models) && models.length > 0) {
                     console.log('[MultiProfileModelSelect] Auto-detected local LM Studio models');
@@ -126,9 +125,8 @@ export function MultiProfileModelSelect({
         const apiPromises = profiles.map(p => fetchProfileModels(p));
 
         // 2. Auto-detect LM Studio (Parallel)
-        // Only if not already present in profiles (to avoid duplicates if user added it manually)
-        const hasLMStudioProfile = profiles.some(p => p.baseUrl && (p.baseUrl.includes('localhost:1234') || p.baseUrl.includes('127.0.0.1:1234')));
-        const localPromise = !hasLMStudioProfile ? fetchLocalLMStudioModels() : Promise.resolve(null);
+        // Always try to fetch local models using settings provided
+        const localPromise = fetchLocalLMStudioModels();
 
         // 3. Fetch from OAuth Claude Accounts (Parallel-ish logic)
         const oauthPromise = (async () => {
