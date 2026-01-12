@@ -527,15 +527,14 @@ export async function testConnection(
 
 /**
  * Discover available models from API endpoint
- *
- * Fetches the list of available models from the Anthropic-compatible /v1/models endpoint.
- * Uses the Anthropic SDK for built-in timeout, retry, and error handling.
- *
+ * 
+ * Fetches the list of available models using a robust fetch-based approach
+ * to support both Anthropic and OpenAI-compatible (LM Studio/Ollama) endpoints.
+ * 
  * @param baseUrl - API base URL (will be normalized)
  * @param apiKey - API key for authentication
- * @param signal - Optional AbortSignal for cancelling the request (checked before request)
+ * @param signal - Optional AbortSignal for cancelling the request
  * @returns Promise<DiscoverModelsResult> List of available models
- * @throws Error with errorType for auth/network/endpoint/timeout/not_supported failures
  */
 export async function discoverModels(
   baseUrl: string,
@@ -543,96 +542,113 @@ export async function discoverModels(
   signal?: AbortSignal
 ): Promise<DiscoverModelsResult> {
   // Validate API key first
-  if (!validateApiKey(apiKey)) {
+  if (!validateApiKey(apiKey) && apiKey !== 'lm-studio') { // Allow 'lm-studio' dummy key
     const error: Error & { errorType?: string } = new Error('Authentication failed. Please check your API key.');
     error.errorType = 'auth';
     throw error;
   }
 
-  // Normalize baseUrl BEFORE validation
+  // Normalize baseUrl
   let normalizedUrl = baseUrl.trim();
-
-  // If empty, throw error
   if (!normalizedUrl) {
     const error: Error & { errorType?: string } = new Error('Invalid endpoint. Please check the Base URL.');
     error.errorType = 'endpoint';
     throw error;
   }
 
-  // Ensure https:// prefix (auto-prepend if NO protocol exists)
   if (!normalizedUrl.includes('://')) {
     normalizedUrl = `https://${normalizedUrl}`;
   }
-
-  // Remove trailing slash
   normalizedUrl = normalizedUrl.replace(/\/+$/, '');
 
-  // Validate the normalized baseUrl
-  if (!validateBaseUrl(normalizedUrl)) {
-    const error: Error & { errorType?: string } = new Error('Invalid endpoint. Please check the Base URL.');
-    error.errorType = 'endpoint';
-    throw error;
-  }
+  // Construct models endpoint URL
+  // If URL ends in /v1, append /models
+  // If URL doesn't end in /v1, try appending /v1/models (common convention) or just /models?
+  // Safest is: trust the user's base URL and append /models.
+  // But for Anthropic SDK compatibility, users might input "https://api.anthropic.com". 
+  // Anthropic API is https://api.anthropic.com/v1/models.
+  // OpenAI/LM Studio is .../v1/models.
 
-  // Check if signal already aborted
-  if (signal?.aborted) {
-    const error: Error & { errorType?: string } = new Error('Connection timeout. The endpoint did not respond.');
-    error.errorType = 'timeout';
-    throw error;
-  }
+  let modelsUrl = `${normalizedUrl}/models`;
+
+  // If user entered root URL without version, help them out?
+  // But let's stick to standard behavior: Base URL is the prefix for /models.
 
   try {
-    // Create Anthropic client with SDK
-    const client = new Anthropic({
-      apiKey,
-      baseURL: normalizedUrl,
-      timeout: 10000, // 10 seconds
-      maxRetries: 0, // Disable retries for immediate feedback
+    // Prepare headers for BOTH Anthropic and OpenAI compatibility
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      // Anthropic headers
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      // OpenAI headers
+      'Authorization': `Bearer ${apiKey}`
+    };
+
+    const response = await fetch(modelsUrl, {
+      method: 'GET',
+      headers,
+      signal
     });
 
-    // Fetch models with pagination (1000 limit to get all), pass signal for cancellation
-    const response = await client.models.list({ limit: 1000 }, { signal: signal ?? undefined });
+    if (!response.ok) {
+      // Handle specific HTTP errors
+      if (response.status === 401 || response.status === 403) {
+        const error: Error & { errorType?: string } = new Error('Authentication failed. Please check your API key.');
+        error.errorType = 'auth';
+        throw error;
+      }
+      if (response.status === 404) {
+        const error: Error & { errorType?: string } = new Error(`Endpoint not found: ${modelsUrl}`);
+        error.errorType = 'endpoint';
+        throw error;
+      }
 
-    // Extract model information from SDK response
-    const models: ModelInfo[] = response.data
-      .map((model) => ({
-        id: model.id || '',
-        display_name: model.display_name || model.id || ''
+      const text = await response.text();
+      throw new Error(`API request failed with status ${response.status}: ${text}`);
+    }
+
+    const data = await response.json() as any;
+
+    // Parse models from response
+    // Support both { data: [...] } (Standard) and { models: [...] } (Some variations)
+    const modelsList = Array.isArray(data.data) ? data.data : (Array.isArray(data.models) ? data.models : []);
+
+    if (!Array.isArray(modelsList)) {
+      throw new Error('Invalid API response: "data" field is missing or not an array');
+    }
+
+    // Map to ModelInfo, loosely accepting OpenAI or Anthropic format
+    const models: ModelInfo[] = modelsList
+      .map((model: any) => ({
+        id: model.id || model.name || '',
+        display_name: model.display_name || model.id || model.name || ''
       }))
-      .filter((model) => model.id.length > 0);
+      .filter((model) => model.id && model.id.trim().length > 0);
 
     return { models };
+
   } catch (error) {
-    // Map SDK errors to thrown errors with errorType property
-    // Use error.name for instanceof-like checks (works with mocks that set this.name)
-    const errorName = error instanceof Error ? error.name : '';
-
-    if (errorName === 'AuthenticationError' || error instanceof AuthenticationError) {
-      const authError: Error & { errorType?: string } = new Error('Authentication failed. Please check your API key.');
-      authError.errorType = 'auth';
-      throw authError;
+    // Pass through custom errorTypes
+    if ((error as any).errorType) {
+      throw error;
     }
 
-    if (errorName === 'NotFoundError' || error instanceof NotFoundError) {
-      const notSupportedError: Error & { errorType?: string } = new Error('This API endpoint does not support model listing. Please enter the model name manually.');
-      notSupportedError.errorType = 'not_supported';
-      throw notSupportedError;
+    // Map fetch errors
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        const e: Error & { errorType?: string } = new Error('Connection timeout.');
+        e.errorType = 'timeout';
+        throw e;
+      }
+      if (error.message.includes('fetch failed')) {
+        const e: Error & { errorType?: string } = new Error('Network connection failed. Check URL and internet.');
+        e.errorType = 'network';
+        throw e;
+      }
     }
 
-    if (errorName === 'APIConnectionTimeoutError' || error instanceof APIConnectionTimeoutError) {
-      const timeoutError: Error & { errorType?: string } = new Error('Connection timeout. The endpoint did not respond.');
-      timeoutError.errorType = 'timeout';
-      throw timeoutError;
-    }
-
-    if (errorName === 'APIConnectionError' || error instanceof APIConnectionError) {
-      const networkError: Error & { errorType?: string } = new Error('Network error. Please check your internet connection.');
-      networkError.errorType = 'network';
-      throw networkError;
-    }
-
-    // APIError or other errors
-    const unknownError: Error & { errorType?: string } = new Error('Connection test failed. Please try again.');
+    const unknownError: Error & { errorType?: string } = new Error(error instanceof Error ? error.message : 'Discovery failed');
     unknownError.errorType = 'unknown';
     throw unknownError;
   }
