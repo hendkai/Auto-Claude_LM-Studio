@@ -178,11 +178,12 @@ def get_phase_model(
     """
     Get the resolved model ID for a specific execution phase.
 
-    Priority:
+    Priority (UPDATED - frontend current settings take precedence):
     1. CLI argument (if provided)
-    2. Phase-specific config from task_metadata.json (if auto profile)
-    3. Single model from task_metadata.json (if not auto profile)
-    4. Default phase configuration
+    2. ANTHROPIC_MODEL env var (set by frontend with CURRENT settings)
+    3. Phase-specific config from task_metadata.json (legacy, for backward compat)
+    4. Single model from task_metadata.json (if not auto profile)
+    5. Default phase configuration
 
     Args:
         spec_dir: Path to the spec directory
@@ -196,7 +197,13 @@ def get_phase_model(
     if cli_model:
         return resolve_model_id(cli_model)
 
-    # Load task metadata
+    # ANTHROPIC_MODEL env var takes precedence over stored task config
+    # This is set by the frontend based on CURRENT settings (not task creation time)
+    env_model = os.environ.get("ANTHROPIC_MODEL")
+    if env_model:
+        return resolve_model_id(env_model)
+
+    # Load task metadata (legacy fallback - for backward compatibility)
     metadata = load_task_metadata(spec_dir)
 
     if metadata:
