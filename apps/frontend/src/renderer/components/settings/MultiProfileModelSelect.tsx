@@ -68,63 +68,113 @@ export function MultiProfileModelSelect({
     /**
      * Fetch models from all profiles (both API profiles and OAuth accounts)
      */
+    /**
+     * Fetch models from all profiles (both API profiles and OAuth accounts)
+     * AND auto-detect local LM Studio instance
+     */
     const fetchAllProfileModels = async () => {
         setIsLoading(true);
         const results: ProfileModels[] = [];
 
-        // 1. Fetch from API Profiles
-        for (const profile of profiles) {
+        // Helper to safely fetch models for a profile
+        const fetchProfileModels = async (profile: any) => {
             try {
                 const models = await discoverModels(
                     profile.baseUrl,
                     profile.apiKey,
-                    undefined // no abort signal for simplicity
+                    undefined
                 );
 
                 if (models && Array.isArray(models) && models.length > 0) {
-                    results.push({
-                        profileId: `api:${profile.id}`, // Prefix with 'api:' to distinguish
+                    return {
+                        profileId: `api:${profile.id}`,
                         profileName: `${profile.name} (API)`,
                         models
-                    });
+                    };
                 }
             } catch (err) {
                 console.warn(`[MultiProfileModelSelect] Failed to fetch models from API profile ${profile.name}:`, err);
-                // Continue with other profiles
             }
-        }
+            return null;
+        };
 
-        // 2. Fetch from OAuth Claude Accounts
-        try {
-            const claudeProfilesResult = await window.electronAPI.getClaudeProfiles();
-            if (claudeProfilesResult.success && claudeProfilesResult.data) {
-                const authenticatedOAuthProfiles = claudeProfilesResult.data.profiles.filter(
-                    (p: any) => p.oauthToken || (p.isDefault && p.configDir)
+        // Helper for local LM Studio detection
+        const fetchLocalLMStudioModels = async () => {
+            try {
+                // Try standard LM Studio port
+                const models = await discoverModels(
+                    'http://localhost:1234/v1',
+                    'lm-studio', // Standard dummy key for LM Studio
+                    undefined
                 );
 
-                // For each authenticated OAuth account, add Claude models
-                for (const oauthProfile of authenticatedOAuthProfiles) {
-                    // Claude OAuth accounts have access to the same models as API
-                    // We use a static list since OAuth uses claude.ai, not an API endpoint
-                    const claudeModels: ModelInfo[] = [
-                        { id: 'claude-sonnet-4-5-20250929', display_name: 'Claude Sonnet 4.5' },
-                        { id: 'claude-code', display_name: 'Claude Code' },
-                        { id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 4.5' },
-                        { id: 'claude-opus-4-5-20251101', display_name: 'Claude Opus 4.5' }
-                    ];
-
-                    results.push({
-                        profileId: `oauth:${oauthProfile.id}`, // Prefix with 'oauth:'
-                        profileName: `${oauthProfile.name} (OAuth)${oauthProfile.email ? ` - ${oauthProfile.email}` : ''}`,
-                        models: claudeModels
-                    });
+                if (models && Array.isArray(models) && models.length > 0) {
+                    console.log('[MultiProfileModelSelect] Auto-detected local LM Studio models');
+                    return {
+                        profileId: 'local:lm-studio',
+                        profileName: 'Local (LM Studio)',
+                        models
+                    };
                 }
+            } catch (err) {
+                // Ignore errors (not running)
             }
-        } catch (err) {
-            console.warn('[MultiProfileModelSelect] Failed to fetch OAuth Claude accounts:', err);
-        }
+            return null;
+        };
 
-        setProfileModels(results);
+        // 1. Fetch from API Profiles (Parallel)
+        const apiPromises = profiles.map(p => fetchProfileModels(p));
+
+        // 2. Auto-detect LM Studio (Parallel)
+        // Only if not already present in profiles (to avoid duplicates if user added it manually)
+        const hasLMStudioProfile = profiles.some(p => p.baseUrl && (p.baseUrl.includes('localhost:1234') || p.baseUrl.includes('127.0.0.1:1234')));
+        const localPromise = !hasLMStudioProfile ? fetchLocalLMStudioModels() : Promise.resolve(null);
+
+        // 3. Fetch from OAuth Claude Accounts (Parallel-ish logic)
+        const oauthPromise = (async () => {
+            try {
+                const claudeProfilesResult = await window.electronAPI.getClaudeProfiles();
+                if (claudeProfilesResult.success && claudeProfilesResult.data) {
+                    const authenticatedOAuthProfiles = claudeProfilesResult.data.profiles.filter(
+                        (p: any) => p.oauthToken || (p.isDefault && p.configDir)
+                    );
+
+                    const oauthResults: ProfileModels[] = [];
+                    for (const oauthProfile of authenticatedOAuthProfiles) {
+                        const claudeModels: ModelInfo[] = [
+                            { id: 'claude-sonnet-4-5-20250929', display_name: 'Claude Sonnet 4.5' },
+                            { id: 'claude-code', display_name: 'Claude Code' },
+                            { id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 4.5' },
+                            { id: 'claude-opus-4-5-20251101', display_name: 'Claude Opus 4.5' }
+                        ];
+
+                        oauthResults.push({
+                            profileId: `oauth:${oauthProfile.id}`,
+                            profileName: `${oauthProfile.name} (OAuth)${oauthProfile.email ? ` - ${oauthProfile.email}` : ''}`,
+                            models: claudeModels
+                        });
+                    }
+                    return oauthResults;
+                }
+            } catch (err) {
+                console.warn('[MultiProfileModelSelect] Failed to fetch OAuth Claude accounts:', err);
+            }
+            return [];
+        })();
+
+        // Wait for all
+        const [apiResults, localResult, oauthResults] = await Promise.all([
+            Promise.all(apiPromises),
+            localPromise,
+            oauthPromise
+        ]);
+
+        // Combine results
+        const validApiResults = apiResults.filter((r): r is ProfileModels => r !== null);
+        const validLocalResult = localResult ? [localResult] : [];
+        const validOauthResults = oauthResults || [];
+
+        setProfileModels([...validOauthResults, ...validApiResults, ...validLocalResult]);
         setIsLoading(false);
     };
 

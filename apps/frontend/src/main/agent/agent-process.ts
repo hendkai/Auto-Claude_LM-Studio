@@ -234,7 +234,7 @@ export class AgentProcessManager {
     const savedFallbackChain = process.fallbackChain;
 
     // Kill current process (only once)
-    this.killProcess(taskId);
+    await this.killProcess(taskId);
 
     // Get env for fallback model
     try {
@@ -509,7 +509,7 @@ export class AgentProcessManager {
     processType: ProcessType = 'task-execution'
   ): Promise<void> {
     const isSpecRunner = processType === 'spec-creation';
-    this.killProcess(taskId);
+    await this.killProcess(taskId);
 
     const spawnId = this.state.generateSpawnId();
     const env = this.setupProcessEnvironment(extraEnv);
@@ -748,8 +748,26 @@ export class AgentProcessManager {
                   if (switched) {
                     console.log('[AgentProcess] Successfully switched to fallback model during execution');
                   } else {
-                    console.log('[AgentProcess] Could not switch to fallback model, will handle on exit');
-                    rateLimitHandled = false; // Allow handling on exit if fallback failed
+                    console.log('[AgentProcess] Could not switch to fallback model, attempting auto-swap');
+
+                    // Try auto-swap
+                    const swapped = this.handleRateLimitWithAutoSwap(taskId, rateLimitDetection, processType);
+
+                    if (swapped) {
+                      console.log('[AgentProcess] Successfully auto-swapped during execution');
+                      // No need to kill process here, the auto-swap handler might need to handle restart?
+                      // Actually handleRateLimitWithAutoSwap emits 'auto-swap-restart-task', which triggers restart logic in execution-handlers
+                      // BUT we should probably ensure this process dies if it's hanging
+                      this.killProcess(taskId);
+                    } else {
+                      console.log('[AgentProcess] Auto-swap failed or disabled, emitting error and killing process');
+                      // Emit rate limit event manually since we're killing the process
+                      const source = processType === 'spec-creation' ? 'roadmap' : 'task';
+                      const rateLimitInfo = createSDKRateLimitInfo(source, rateLimitDetection, { taskId });
+                      this.emitter.emit('sdk-rate-limit', rateLimitInfo);
+
+                      await this.killProcess(taskId);
+                    }
                   }
                 } catch (error) {
                   console.error('[AgentProcess] Error switching to fallback model:', error);
