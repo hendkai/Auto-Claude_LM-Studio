@@ -257,23 +257,32 @@ export class UsageMonitor extends EventEmitter {
         }
 
         // Map to snapshot
-        const customUsageDetails = data.limits.map(limit => ({
-          label: limit.type,
-          value: `${limit.currentValue}${limit.unit} / ${limit.number}${limit.unit}`, // e.g. "1500 TOKEN / 10000 TOKEN" - can be refined if units are just strings
-          rawLabel: limit.type, // Store original type
-          rawValue: typeof limit.currentValue === 'number' && typeof limit.number === 'number'
-            ? `${(limit.currentValue / 1000000).toFixed(2)}M / ${(limit.number / 1000000).toFixed(2)}M` // Assume large numbers are tokens
-            : `${limit.currentValue} / ${limit.number}`,
-          percentage: limit.percentage || 0,
-          resetTime: limit.nextResetTime
-            ? this.formatResetTime(new Date(limit.nextResetTime).toISOString())
-            : undefined
-        })).map(detail => ({
-          label: detail.rawLabel,
-          value: (detail.rawLabel === 'TOKEN' || detail.rawLabel.includes('TOKEN')) ? detail.rawValue : detail.value, // Special formatting for TOKEN/TOKENS_LIMIT
-          percentage: detail.percentage,
-          resetTime: detail.resetTime
-        }));
+        // GLM API returns: currentValue = current usage, usage = total limit
+        const customUsageDetails = data.limits.map(limit => {
+          // Format large numbers (millions of tokens)
+          const formatNumber = (n: number | undefined): string => {
+            if (n === undefined || n === null) return 'N/A';
+            if (n >= 1000000) {
+              return `${(n / 1000000).toFixed(2)}M`;
+            }
+            if (n >= 1000) {
+              return `${(n / 1000).toFixed(1)}K`;
+            }
+            return n.toString();
+          };
+
+          const current = limit.currentValue ?? 0;
+          const total = limit.usage ?? 0; // usage is the total limit, NOT limit.number
+
+          return {
+            label: limit.type,
+            value: `${formatNumber(current)} / ${formatNumber(total)}`,
+            percentage: limit.percentage || 0,
+            resetTime: limit.nextResetTime
+              ? this.formatResetTime(new Date(limit.nextResetTime).toISOString())
+              : undefined
+          };
+        });
 
         return {
           sessionPercent: Math.round(maxPercent),

@@ -521,9 +521,20 @@ export class AgentProcessManager {
     // V3: Use fallback chain (array of ProfileModelPair per phase)
     let apiProfileEnv: Record<string, string> = {};
     let fallbackChain: ProfileModelPair[] = [];
-    // Check if we're restarting with a fallback model (preserve currentFallbackIndex)
+
+    // Check if we're restarting with a fallback model
+    // Only preserve currentFallbackIndex if this is an explicit fallback retry (spawnArgs present)
+    // For normal resume/start, always reset to 0 to try primary model first
     const existingProcess = this.state.getProcess(taskId);
-    let currentFallbackIndex = existingProcess?.currentFallbackIndex ?? 0;
+    const isExplicitFallbackRetry = existingProcess?.spawnArgs !== undefined &&
+      (existingProcess?.currentFallbackIndex ?? 0) > 0;
+    let currentFallbackIndex = isExplicitFallbackRetry ? (existingProcess?.currentFallbackIndex ?? 0) : 0;
+
+    if (isExplicitFallbackRetry) {
+      console.log(`[AgentProcess] Explicit fallback retry - preserving index ${currentFallbackIndex}`);
+    } else if (existingProcess?.currentFallbackIndex !== undefined && existingProcess.currentFallbackIndex > 0) {
+      console.log(`[AgentProcess] Resume/restart - resetting fallback index from ${existingProcess.currentFallbackIndex} to 0 to retry primary model`);
+    }
 
     try {
       // Load settings to check for phase-specific configuration
