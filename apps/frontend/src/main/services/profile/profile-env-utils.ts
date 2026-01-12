@@ -1,22 +1,10 @@
-/**
- * Helper functions for profile-based environment variable generation
- * Supports both OAuth Claude accounts and API profiles
- */
-
+import { readSettingsFile } from '../../settings-utils';
 import { getClaudeProfileManager } from '../../claude-profile-manager';
 import { loadProfilesFile } from './profile-manager';
 import { normalizeBaseUrlForSdk } from './profile-service';
 import type { ProfileModelPair } from '../../../shared/types/settings';
 import type { APIProfile } from '../../../shared/types/profile';
 import type { ClaudeProfile } from '../../../shared/types';
-
-/**
- * Get environment variables for a specific profile+model pair
- * Handles both OAuth Claude accounts (oauth:profileId) and API profiles (api:profileId)
- * 
- * @param pair - ProfileModelPair with profileId (prefixed with 'oauth:' or 'api:') and model
- * @returns Environment variables for the SDK
- */
 export async function getProfileEnvForPair(
     pair: ProfileModelPair
 ): Promise<Record<string, string>> {
@@ -31,6 +19,9 @@ export async function getProfileEnvForPair(
         // API Profile
         const apiProfileId = profileId.replace('api:', '');
         return getAPIProfileEnvById(apiProfileId, model);
+    } else if (profileId.startsWith('local:lm-studio')) {
+        // Local LM Studio
+        return getLocalLMStudioEnv(model);
     } else {
         // Fallback: Assume it's an API profile ID without prefix (backward compat)
         return getAPIProfileEnvById(profileId, model);
@@ -66,6 +57,47 @@ async function getOAuthProfileEnv(
 }
 
 /**
+ * Get environment variables for Local LM Studio
+ * 
+ * @param model - Model name to use
+ * @returns Environment variables for Local LM Studio
+ */
+async function getLocalLMStudioEnv(
+    model: string
+): Promise<Record<string, string>> {
+    try {
+        const settings = await readSettingsFile();
+        // Ensure values are strings, handling undefined/null from settings
+        const baseUrl: string = (settings?.localLmStudioUrl) ? String(settings.localLmStudioUrl) : 'http://localhost:1234/v1';
+        const apiKey: string = (settings?.localLmStudioApiKey) ? String(settings.localLmStudioApiKey) : 'lm-studio';
+        const normalizedUrl = normalizeBaseUrlForSdk(baseUrl);
+
+        // Env vars for OpenAI-compatible local server
+        // We set ANTHROPIC_* vars because the python script likely uses Anthropic SDK
+        // configured to point to local server.
+        // We also set OPENAI_* vars in case the runner supports OpenAI SDK directly (optional improvement)
+        return {
+            ANTHROPIC_BASE_URL: normalizedUrl,
+            ANTHROPIC_AUTH_TOKEN: apiKey,
+            ANTHROPIC_API_KEY: apiKey, // redundancy for SDKs
+            ANTHROPIC_MODEL: model,
+            // Also set generic vars if helpful
+            OPENAI_BASE_URL: normalizedUrl,
+            OPENAI_API_KEY: apiKey,
+        };
+    } catch (err) {
+        console.error('[ProfileEnv] Failed to load settings for Local LM Studio:', err);
+        // Fallback defaults
+        return {
+            ANTHROPIC_BASE_URL: 'http://localhost:1234/v1',
+            ANTHROPIC_AUTH_TOKEN: 'lm-studio',
+            ANTHROPIC_API_KEY: 'lm-studio',
+            ANTHROPIC_MODEL: model
+        };
+    }
+}
+
+/**
  * Get environment variables for API profile by ID
  * 
  * @param apiProfileId - API profile ID (without 'api:' prefix)
@@ -90,6 +122,7 @@ async function getAPIProfileEnvById(
     const envVars: Record<string, string> = {
         ANTHROPIC_BASE_URL: normalizeBaseUrlForSdk(profile.baseUrl || ''),
         ANTHROPIC_AUTH_TOKEN: profile.apiKey || '',
+        ANTHROPIC_API_KEY: profile.apiKey || '', // redundancy
         ANTHROPIC_MODEL: model, // Use model from ProfileModelPair, not profile default
         ANTHROPIC_DEFAULT_HAIKU_MODEL: profile.models?.haiku || '',
         ANTHROPIC_DEFAULT_SONNET_MODEL: profile.models?.sonnet || '',
