@@ -1,30 +1,37 @@
-import type { BrowserWindow } from 'electron';
-import path from 'path';
-import { existsSync } from 'fs';
-import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir } from '../../shared/constants';
-import { wouldPhaseRegress, isTerminalPhase, isValidExecutionPhase, type ExecutionPhase } from '../../shared/constants/phase-protocol';
+import type { BrowserWindow } from "electron";
+import path from "path";
+import { existsSync } from "fs";
+import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir } from "../../shared/constants";
+import {
+  wouldPhaseRegress,
+  isTerminalPhase,
+  isValidExecutionPhase,
+  isValidPhaseTransition,
+  type ExecutionPhase,
+} from "../../shared/constants/phase-protocol";
 import type {
   SDKRateLimitInfo,
   Task,
   TaskStatus,
   Project,
-  ImplementationPlan
-} from '../../shared/types';
-import { AgentManager } from '../agent';
-import type { ProcessType, ExecutionProgressData } from '../agent';
-import { titleGenerator } from '../title-generator';
-import { fileWatcher } from '../file-watcher';
-import { projectStore } from '../project-store';
-import { notificationService } from '../notification-service';
-import { persistPlanStatus, getPlanPath } from './task/plan-file-utils';
-import { findTaskWorktree } from '../worktree-paths';
-import { findTaskAndProject } from './task/shared';
-
+  ImplementationPlan,
+} from "../../shared/types";
+import { AgentManager } from "../agent";
+import type { ProcessType, ExecutionProgressData } from "../agent";
+import { titleGenerator } from "../title-generator";
+import { fileWatcher } from "../file-watcher";
+import { projectStore } from "../project-store";
+import { notificationService } from "../notification-service";
+import { persistPlanStatus, getPlanPath } from "./task/plan-file-utils";
+import { findTaskWorktree } from "../worktree-paths";
+import { findTaskAndProject } from "./task/shared";
+import { safeSendToRenderer } from "./utils";
 
 /**
  * Validates status transitions to prevent invalid state changes.
  * FIX (ACS-55, ACS-71): Adds guardrails against bad status transitions.
  * FIX (PR Review): Uses comprehensive wouldPhaseRegress() utility instead of hardcoded checks.
+ * FIX (ACS-203): Adds phase completion validation to prevent phase overlaps.
  *
  * @param task - The current task (may be undefined if not found)
  * @param newStatus - The proposed new status
@@ -41,8 +48,10 @@ function validateStatusTransition(
 
   // Don't allow human_review without subtasks
   // This prevents tasks from jumping to review before planning is complete
-  if (newStatus === 'human_review' && (!task.subtasks || task.subtasks.length === 0)) {
-    console.warn(`[validateStatusTransition] Blocking human_review - task ${task.id} has no subtasks (phase: ${phase})`);
+  if (newStatus === "human_review" && (!task.subtasks || task.subtasks.length === 0)) {
+    console.warn(
+      `[validateStatusTransition] Blocking human_review - task ${task.id} has no subtasks (phase: ${phase})`
+    );
     return false;
   }
 
@@ -50,24 +59,46 @@ function validateStatusTransition(
   // This handles all phase regressions (qa_review→coding, complete→coding, etc.)
   // not just the specific coding→planning case
   const currentPhase = task.executionProgress?.phase;
+  const completedPhases = task.executionProgress?.completedPhases || [];
+
   if (currentPhase && isValidExecutionPhase(currentPhase) && isValidExecutionPhase(phase)) {
     // Block transitions from terminal phases (complete/failed)
     if (isTerminalPhase(currentPhase)) {
-      console.warn(`[validateStatusTransition] Blocking transition from terminal phase: ${currentPhase} for task ${task.id}`);
+      console.warn(
+        `[validateStatusTransition] Blocking transition from terminal phase: ${currentPhase} for task ${task.id}`
+      );
       return false;
     }
 
     // Block any phase regression (going backwards in the workflow)
     // Note: Cast phase to ExecutionPhase since isValidExecutionPhase() type guard doesn't narrow through function calls
     if (wouldPhaseRegress(currentPhase, phase as ExecutionPhase)) {
-      console.warn(`[validateStatusTransition] Blocking phase regression: ${currentPhase} -> ${phase} for task ${task.id}`);
+      console.warn(
+        `[validateStatusTransition] Blocking phase regression: ${currentPhase} -> ${phase} for task ${task.id}`
+      );
+      return false;
+    }
+
+    // FIX (ACS-203): Validate phase transitions based on completed phases
+    // This prevents multiple phases from being active simultaneously
+    // e.g., coding starting while planning is still marked as active
+    const newPhase = phase as ExecutionPhase;
+    if (!isValidPhaseTransition(currentPhase, newPhase, completedPhases)) {
+      console.warn(
+        `[validateStatusTransition] Blocking invalid phase transition: ${currentPhase} -> ${newPhase} for task ${task.id}`,
+        {
+          currentPhase,
+          newPhase,
+          completedPhases,
+          reason: "Prerequisite phases not completed",
+        }
+      );
       return false;
     }
   }
 
   return true;
 }
-
 
 /**
  * Register all agent-events-related IPC handlers
@@ -83,38 +114,26 @@ export function registerAgenteventsHandlers(
   // Cache last persisted status to debounce updates and prevent IO saturation
   const lastTaskStatus = new Map<string, TaskStatus>();
 
-  agentManager.on('log', (taskId: string, log: string) => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      // Include projectId for multi-project filtering (issue #723)
-      const { project } = findTaskAndProject(taskId);
-      mainWindow.webContents.send(IPC_CHANNELS.TASK_LOG, taskId, log, project?.id);
-    }
+  agentManager.on("log", (taskId: string, log: string) => {
+    // Include projectId for multi-project filtering (issue #723)
+    const { project } = findTaskAndProject(taskId);
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LOG, taskId, log, project?.id);
   });
 
-  agentManager.on('error', (taskId: string, error: string) => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      // Include projectId for multi-project filtering (issue #723)
-      const { project } = findTaskAndProject(taskId);
-      mainWindow.webContents.send(IPC_CHANNELS.TASK_ERROR, taskId, error, project?.id);
-    }
+  agentManager.on("error", (taskId: string, error: string) => {
+    // Include projectId for multi-project filtering (issue #723)
+    const { project } = findTaskAndProject(taskId);
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_ERROR, taskId, error, project?.id);
   });
 
   // Handle SDK rate limit events from agent manager
-  agentManager.on('sdk-rate-limit', (rateLimitInfo: SDKRateLimitInfo) => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      mainWindow.webContents.send(IPC_CHANNELS.CLAUDE_SDK_RATE_LIMIT, rateLimitInfo);
-    }
+  agentManager.on("sdk-rate-limit", (rateLimitInfo: SDKRateLimitInfo) => {
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.CLAUDE_SDK_RATE_LIMIT, rateLimitInfo);
   });
 
   // Handle SDK rate limit events from title generator
-  titleGenerator.on('sdk-rate-limit', (rateLimitInfo: SDKRateLimitInfo) => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      mainWindow.webContents.send(IPC_CHANNELS.CLAUDE_SDK_RATE_LIMIT, rateLimitInfo);
-    }
+  titleGenerator.on("sdk-rate-limit", (rateLimitInfo: SDKRateLimitInfo) => {
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.CLAUDE_SDK_RATE_LIMIT, rateLimitInfo);
   });
 
   agentManager.on('exit', async (taskId: string, code: number | null, processType: ProcessType) => {
@@ -160,7 +179,7 @@ export function registerAgenteventsHandlers(
       try {
         const finalPlan = fileWatcher.getCurrentPlan(taskId);
         if (finalPlan) {
-          mainWindow.webContents.send(IPC_CHANNELS.TASK_PROGRESS, taskId, finalPlan, exitProjectId);
+          safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_PROGRESS, taskId, finalPlan, exitProjectId);
         }
       } catch (planError) {
         console.error(`[Task ${taskId}] Failed to send final plan state:`, planError);
@@ -272,7 +291,8 @@ export function registerAgenteventsHandlers(
             try {
               await persistStatus('human_review');
               // Include projectId for multi-project filtering (issue #723)
-              mainWindow.webContents.send(
+              safeSendToRenderer(
+                getMainWindow,
                 IPC_CHANNELS.TASK_STATUS_CHANGE,
                 taskId,
                 'human_review' as TaskStatus,
@@ -297,7 +317,8 @@ export function registerAgenteventsHandlers(
           try {
             await persistStatus('human_review');
             // Include projectId for multi-project filtering (issue #723)
-            mainWindow.webContents.send(
+            safeSendToRenderer(
+              getMainWindow,
               IPC_CHANNELS.TASK_STATUS_CHANGE,
               taskId,
               'human_review' as TaskStatus,
@@ -338,23 +359,30 @@ export function registerAgenteventsHandlers(
       const taskProjectId = project?.id;
 
       // Include projectId in execution progress event for multi-project filtering
-      mainWindow.webContents.send(IPC_CHANNELS.TASK_EXECUTION_PROGRESS, taskId, progress, taskProjectId);
+      safeSendToRenderer(
+        getMainWindow,
+        IPC_CHANNELS.TASK_EXECUTION_PROGRESS,
+        taskId,
+        progress,
+        taskProjectId
+      );
 
       const phaseToStatus: Record<string, TaskStatus | null> = {
-        'idle': null,
-        'planning': 'in_progress',
-        'coding': 'in_progress',
-        'qa_review': 'ai_review',
-        'qa_fixing': 'ai_review',
-        'complete': 'human_review',
-        'failed': 'human_review'
+        idle: null,
+        planning: "in_progress",
+        coding: "in_progress",
+        qa_review: "ai_review",
+        qa_fixing: "ai_review",
+        complete: "human_review",
+        failed: "human_review",
       };
 
       const newStatus = phaseToStatus[progress.phase];
       // FIX (ACS-55, ACS-71): Validate status transition before sending/persisting
       if (newStatus && validateStatusTransition(task, newStatus, progress.phase)) {
         // Include projectId in status change event for multi-project filtering
-        mainWindow.webContents.send(
+        safeSendToRenderer(
+          getMainWindow,
           IPC_CHANNELS.TASK_STATUS_CHANGE,
           taskId,
           newStatus,
@@ -399,7 +427,7 @@ export function registerAgenteventsHandlers(
             }
           } catch (err) {
             // Ignore persistence errors - UI will still work, just might flip on refresh
-            console.warn('[execution-progress] Could not persist status:', err);
+            console.warn("[execution-progress] Could not persist status:", err);
           }
         }
       }
@@ -410,21 +438,15 @@ export function registerAgenteventsHandlers(
   // File Watcher Events → Renderer
   // ============================================
 
-  fileWatcher.on('progress', (taskId: string, plan: ImplementationPlan) => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      // Use shared helper to find project (issue #723 - deduplicate lookup)
-      const { project } = findTaskAndProject(taskId);
-      mainWindow.webContents.send(IPC_CHANNELS.TASK_PROGRESS, taskId, plan, project?.id);
-    }
+  fileWatcher.on("progress", (taskId: string, plan: ImplementationPlan) => {
+    // Use shared helper to find project (issue #723 - deduplicate lookup)
+    const { project } = findTaskAndProject(taskId);
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_PROGRESS, taskId, plan, project?.id);
   });
 
-  fileWatcher.on('error', (taskId: string, error: string) => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      // Include projectId for multi-project filtering (issue #723)
-      const { project } = findTaskAndProject(taskId);
-      mainWindow.webContents.send(IPC_CHANNELS.TASK_ERROR, taskId, error, project?.id);
-    }
+  fileWatcher.on("error", (taskId: string, error: string) => {
+    // Include projectId for multi-project filtering (issue #723)
+    const { project } = findTaskAndProject(taskId);
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_ERROR, taskId, error, project?.id);
   });
 }

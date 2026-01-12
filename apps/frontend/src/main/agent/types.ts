@@ -1,5 +1,6 @@
 import { ChildProcess } from 'child_process';
 import type { IdeationConfig, ProfileModelPair } from '../../shared/types';
+import type { CompletablePhase } from '../../shared/constants/phase-protocol';
 
 /**
  * Agent-specific types for process and state management
@@ -34,6 +35,8 @@ export interface ExecutionProgressData {
   currentSubtask?: string;
   message?: string;
   currentModel?: string;  // Currently active model (may differ from configured model if fallback was used)
+  // FIX (ACS-203): Track completed phases to prevent phase overlaps
+  completedPhases?: CompletablePhase[];
 }
 
 export type ProcessType = 'spec-creation' | 'task-execution' | 'qa-process';

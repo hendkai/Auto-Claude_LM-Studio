@@ -160,7 +160,7 @@ export interface ElectronAPI {
   startTask: (taskId: string, options?: TaskStartOptions) => void;
   stopTask: (taskId: string) => void;
   submitReview: (taskId: string, approved: boolean, feedback?: string) => Promise<IPCResult>;
-  updateTaskStatus: (taskId: string, status: TaskStatus) => Promise<IPCResult>;
+  updateTaskStatus: (taskId: string, status: TaskStatus, options?: { forceCleanup?: boolean }) => Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }>;
   recoverStuckTask: (taskId: string, options?: TaskRecoveryOptions) => Promise<IPCResult<TaskRecoveryResult>>;
   checkTaskRunning: (taskId: string) => Promise<IPCResult<boolean>>;
 

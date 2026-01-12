@@ -3,9 +3,9 @@
  */
 
 import type { ThinkingLevel, PhaseModelConfig, PhaseThinkingConfig, PhaseModelConfigV3 } from './settings';
-import type { ExecutionPhase as ExecutionPhaseType } from '../constants/phase-protocol';
+import type { ExecutionPhase as ExecutionPhaseType, CompletablePhase } from '../constants/phase-protocol';
 
-export type TaskStatus = 'backlog' | 'in_progress' | 'ai_review' | 'human_review' | 'pr_created' | 'done';
+export type TaskStatus = 'backlog' | 'in_progress' | 'ai_review' | 'human_review' | 'pr_created' | 'done' | 'error';
 
 // Reason why a task is in human_review status
 // - 'completed': All subtasks done and QA passed, ready for final approval/merge
@@ -28,6 +28,10 @@ export interface ExecutionProgress {
   startedAt?: Date;
   sequenceNumber?: number;  // Monotonically increasing counter to detect stale updates
   currentModel?: string;  // Currently active model (may differ from configured model if fallback was used)
+  // FIX (ACS-203): Track completed phases to prevent phase overlaps
+  // When a phase completes, it's added to this array before transitioning to the next phase
+  // This ensures that planning is marked complete before coding starts, etc.
+  completedPhases?: CompletablePhase[];  // Phases that have successfully completed
 }
 
 export interface Subtask {
@@ -238,6 +242,12 @@ export interface TaskMetadata {
   archivedInVersion?: string;  // Version in which task was archived (from changelog)
 }
 
+// Structured error information for tasks with parse errors
+export interface TaskErrorInfo {
+  key: string;  // Translation key (e.g., 'errors:task.parseImplementationPlan')
+  meta?: { specId?: string; error?: string };  // Error context for substitution in translation
+}
+
 export interface Task {
   id: string;
   specId: string;
@@ -250,6 +260,7 @@ export interface Task {
   qaReport?: QAReport;
   logs: string[];
   metadata?: TaskMetadata;  // Rich metadata from ideation or manual entry
+  errorInfo?: TaskErrorInfo;  // Structured error information for i18n (set when status is 'error')
   executionProgress?: ExecutionProgress;  // Real-time execution progress
   releasedInVersion?: string;  // Version in which this task was released
   stagedInMainProject?: boolean;  // True if changes were staged to main project (worktree merged with --no-commit)
@@ -303,6 +314,7 @@ export interface WorktreeStatus {
   worktreePath?: string;
   branch?: string;
   baseBranch?: string;
+  currentProjectBranch?: string; // User's current checked-out branch in main project (merge target)
   commitCount?: number;
   filesChanged?: number;
   additions?: number;
