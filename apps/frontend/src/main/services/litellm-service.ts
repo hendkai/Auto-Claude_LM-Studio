@@ -85,6 +85,15 @@ export class LiteLLMService extends EventEmitter {
     }
 
     const defaultConfig = `model_list:
+  # Wildcard: route ANY model name to LM Studio
+  # This allows using any model loaded in LM Studio without config changes
+  - model_name: "*"
+    litellm_params:
+      model: "openai/*"
+      api_base: "http://localhost:1234/v1"
+      api_key: "lm-studio"
+  
+  # Explicit local-model for backwards compatibility
   - model_name: local-model
     litellm_params:
       model: openai/local-model
@@ -212,7 +221,7 @@ litellm_settings:
     // Use litellm.proxy.proxy_cli.run_server.main() to invoke the Click command
     // because litellm doesn't have __main__.py
     console.log(`[LiteLLM] Starting with config: ${configPath}`);
-    
+
     // Create a small Python script to start LiteLLM
     // PYTHONPATH is already set in pythonEnv, so we just need to import and run
     const litellmScript = `
@@ -231,13 +240,13 @@ sys.argv = ['litellm', '--config', r"${configPath.replace(/\\/g, '\\\\')}", '--p
 # Invoke the Click command with standalone_mode=False to prevent sys.exit()
 run_server.main(standalone_mode=False)
 `.trim();
-    
+
     // Write script to temp file
     const tempScriptPath = path.join(app.getPath('temp'), 'litellm_start.py');
     fs.writeFileSync(tempScriptPath, litellmScript);
     console.log(`[LiteLLM] Created startup script: ${tempScriptPath}`);
     console.log(`[LiteLLM] PYTHONPATH: ${pythonEnv.PYTHONPATH || 'not set'}`);
-    
+
     this.process = spawn(pythonCommand, [
       tempScriptPath,
     ], {

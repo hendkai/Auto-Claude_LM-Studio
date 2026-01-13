@@ -1,4 +1,19 @@
 model_list:
+  # Generic fallback for any model name
+  - model_name: "*"
+    litellm_params:
+      model: "openai/*"
+      api_base: "http://localhost:1234/v1"
+      api_key: "lm-studio"
+  
+  # Explicit devstral model
+  - model_name: devstral-small-2-24b-instruct-2512
+    litellm_params:
+      model: openai/devstral-small-2-24b-instruct-2512
+      api_base: "http://localhost:1234/v1"
+      api_key: "lm-studio"
+
+  # Keep generic local-model for backwards compatibility
   - model_name: local-model
     litellm_params:
       model: openai/local-model
