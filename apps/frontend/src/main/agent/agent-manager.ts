@@ -5,7 +5,7 @@ import { AgentState } from './agent-state';
 import { AgentEvents } from './agent-events';
 import { AgentProcessManager } from './agent-process';
 import { AgentQueueManager } from './agent-queue';
-import { getClaudeProfileManager } from '../claude-profile-manager';
+import { getClaudeProfileManager, initializeClaudeProfileManager } from '../claude-profile-manager';
 import {
   SpecCreationMetadata,
   TaskExecutionOptions,
@@ -106,6 +106,21 @@ export class AgentManager extends EventEmitter {
       console.warn(`[AgentManager] Task ${taskId} is already starting. Ignoring duplicate start request.`);
       return;
     }
+
+    // Pre-flight auth check: Verify active profile has valid authentication
+    // Ensure profile manager is initialized to prevent race condition
+    let profileManager;
+    try {
+      profileManager = await initializeClaudeProfileManager();
+    } catch (error) {
+      console.error('[AgentManager] Failed to initialize profile manager:', error);
+      this.emit('error', taskId, 'Failed to initialize profile manager. Please check file permissions and disk space.');
+      return;
+    }
+    if (!profileManager.hasValidAuth()) {
+      this.emit('error', taskId, 'Claude authentication required. Please authenticate in Settings > Claude Profiles before starting tasks.');
+      return;
+    }
     this.startingTasks.add(taskId);
 
     try {
@@ -193,6 +208,21 @@ export class AgentManager extends EventEmitter {
     // Prevent double-start race condition (e.g. auto-start + manual click)
     if (this.startingTasks.has(taskId)) {
       console.warn(`[AgentManager] Task ${taskId} is already starting. Ignoring duplicate start request.`);
+      return;
+    }
+
+    // Pre-flight auth check: Verify active profile has valid authentication
+    // Ensure profile manager is initialized to prevent race condition
+    let profileManager;
+    try {
+      profileManager = await initializeClaudeProfileManager();
+    } catch (error) {
+      console.error('[AgentManager] Failed to initialize profile manager:', error);
+      this.emit('error', taskId, 'Failed to initialize profile manager. Please check file permissions and disk space.');
+      return;
+    }
+    if (!profileManager.hasValidAuth()) {
+      this.emit('error', taskId, 'Claude authentication required. Please authenticate in Settings > Claude Profiles before starting tasks.');
       return;
     }
     this.startingTasks.add(taskId);

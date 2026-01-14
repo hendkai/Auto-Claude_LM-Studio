@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
 
     // Load configuration
     let mut config = config::Config::load()
-        .context("Failed to load configuration. Please ensure ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN are set, or create a config file at ~/.config/glm-usage-monitor/config.toml")?;
+        .context("Failed to load configuration. Please ensure ANTHROPIC_BASE_URL (or GLM_BASE_URL) and AUTH_TOKEN are set.")?;
 
     // Apply CLI overrides
     if let Some(refresh) = cli.refresh_sec {
@@ -60,10 +60,10 @@ async fn main() -> Result<()> {
     if cli.waybar {
         if let Some(quota) = app.get_quota() {
             let mut tooltip = String::new();
-            let mut text = String::new();
+            let mut text_parts = Vec::new();
             let mut class = "normal";
 
-            // Find the most critical limit (highest percentage)
+            // Find the most critical limit (highest percentage) for class determination
             let mut max_pct = 0.0;
 
             for limit in &quota.limits {
@@ -78,15 +78,21 @@ async fn main() -> Result<()> {
                 if let Some(pct) = limit.percentage {
                     if pct > max_pct {
                         max_pct = pct;
-                        // Use this limit for the main text
-                        text = format!("{}: {:.0}%", limit.limit_type, pct);
                     }
+                    // Add to text parts: "Type: 100/500 (20%)"
+                    let cur = crate::models::Format::format_int(limit.current_value).replace(" ", "");
+                    let total = crate::models::Format::format_int(limit.usage).replace(" ", "");
+                    text_parts.push(format!("{}: {}/{} ({:.0}%)", limit.limit_type, cur, total, pct));
+                } else {
+                     text_parts.push(format!("{}: N/A", limit.limit_type));
                 }
             }
 
-            if text.is_empty() {
-                text = "GLM: N/A".to_string();
-            }
+            let text = if text_parts.is_empty() {
+                "GLM: N/A".to_string()
+            } else {
+                text_parts.join(" | ")
+            };
 
             // Set class based on usage
             if max_pct > 90.0 {
