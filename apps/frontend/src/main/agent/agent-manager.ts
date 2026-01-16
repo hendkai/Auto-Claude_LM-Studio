@@ -124,10 +124,10 @@ export class AgentManager extends EventEmitter {
     this.startingTasks.add(taskId);
 
     try {
-      // Pre-flight auth check: Verify active profile has valid authentication
-      const profileManager = getClaudeProfileManager();
-      if (!profileManager.hasValidAuth()) {
-        this.emit('error', taskId, 'Claude authentication required. Please authenticate in Settings > Claude Profiles before starting tasks.');
+      // Ensure Python environment is ready before spawning process (prevents exit code 127 race condition)
+      const pythonStatus = await this.processManager.ensurePythonEnvReady('AgentManager');
+      if (!pythonStatus.ready) {
+        this.emit('error', taskId, `Python environment not ready: ${pythonStatus.error || 'initialization failed'}`);
         return;
       }
 
@@ -228,10 +228,10 @@ export class AgentManager extends EventEmitter {
     this.startingTasks.add(taskId);
 
     try {
-      // Pre-flight auth check: Verify active profile has valid authentication
-      const profileManager = getClaudeProfileManager();
-      if (!profileManager.hasValidAuth()) {
-        this.emit('error', taskId, 'Claude authentication required. Please authenticate in Settings > Claude Profiles before starting tasks.');
+      // Ensure Python environment is ready before spawning process (prevents exit code 127 race condition)
+      const pythonStatus = await this.processManager.ensurePythonEnvReady('AgentManager');
+      if (!pythonStatus.ready) {
+        this.emit('error', taskId, `Python environment not ready: ${pythonStatus.error || 'initialization failed'}`);
         return;
       }
 
@@ -292,6 +292,13 @@ export class AgentManager extends EventEmitter {
     projectPath: string,
     specId: string
   ): Promise<void> {
+    // Ensure Python environment is ready before spawning process (prevents exit code 127 race condition)
+    const pythonStatus = await this.processManager.ensurePythonEnvReady('AgentManager');
+    if (!pythonStatus.ready) {
+      this.emit('error', taskId, `Python environment not ready: ${pythonStatus.error || 'initialization failed'}`);
+      return;
+    }
+
     const autoBuildSource = this.processManager.getAutoBuildSourcePath();
 
     if (!autoBuildSource) {

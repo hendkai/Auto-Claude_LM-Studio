@@ -18,7 +18,7 @@ import { Textarea } from '../ui/textarea';
 import { Checkbox } from '../ui/checkbox';
 import { AgentProfileSelector } from '../AgentProfileSelector';
 import { ClassificationFields } from './ClassificationFields';
-import { useImageUpload } from './useImageUpload';
+import { useImageUpload, type FileReferenceData } from './useImageUpload';
 import { cn } from '../../lib/utils';
 import type {
   TaskCategory,
@@ -91,6 +91,9 @@ interface TaskFormFieldsProps {
 
   /** Optional children to render after description (e.g., @ mention highlight overlay) */
   children?: ReactNode;
+
+  /** Callback when a file reference is dropped (from FileTreeItem drag) */
+  onFileReferenceDrop?: (reference: string, data: FileReferenceData) => void;
 }
 
 export function TaskFormFields({
@@ -131,7 +134,8 @@ export function TaskFormFields({
   error,
   onError,
   idPrefix = '',
-  children
+  children,
+  onFileReferenceDrop
 }: TaskFormFieldsProps) {
   const { t } = useTranslation(['tasks', 'common']);
   // Use external ref if provided (for @ mention autocomplete), otherwise use internal ref
@@ -158,7 +162,8 @@ export function TaskFormFields({
       invalidImageType: t('tasks:form.errors.invalidImageType'),
       processPasteFailed: t('tasks:form.errors.processPasteFailed'),
       processDropFailed: t('tasks:form.errors.processDropFailed')
-    }
+    },
+    onFileReferenceDrop
   });
 
   return (
