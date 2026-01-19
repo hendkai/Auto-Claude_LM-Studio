@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TypedDict, TypeVar
 
 from core.gh_executable import get_gh_executable, invalidate_gh_cache
-from core.git_executable import get_git_executable, run_git
+from core.git_executable import get_git_executable, get_isolated_git_env, run_git
 from debug import debug_warning
 
 T = TypeVar("T")
@@ -899,6 +899,7 @@ class WorktreeManager:
                     encoding="utf-8",
                     errors="replace",
                     timeout=self.GIT_PUSH_TIMEOUT,
+                    env=get_isolated_git_env(),
                 )
 
                 if result.returncode == 0:
@@ -1017,6 +1018,7 @@ class WorktreeManager:
                     encoding="utf-8",
                     errors="replace",
                     timeout=self.GH_CLI_TIMEOUT,
+                    env=get_isolated_git_env(),
                 )
 
                 # Check for "already exists" case (success, no retry needed)
@@ -1169,6 +1171,7 @@ class WorktreeManager:
                 encoding="utf-8",
                 errors="replace",
                 timeout=self.GH_QUERY_TIMEOUT,
+                env=get_isolated_git_env(),
             )
             if result.returncode == 0:
                 return result.stdout.strip()

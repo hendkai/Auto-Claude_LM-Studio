@@ -15,14 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, ChevronDown, ChevronUp, RotateCcw, FolderTree, GitBranch, Info } from 'lucide-react';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from './ui/select';
-import { Checkbox } from './ui/checkbox';
+import { Combobox, type ComboboxOption } from './ui/combobox';
 import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
 import { type FileReferenceData } from './task-form/useImageUpload';
@@ -32,8 +25,7 @@ import { createTask, saveDraft, loadDraft, clearDraft, isDraftEmpty } from '../s
 import { useProjectStore } from '../stores/project-store';
 import { cn } from '../lib/utils';
 import type { TaskCategory, TaskPriority, TaskComplexity, TaskImpact, TaskMetadata, ImageAttachment, TaskDraft, ModelType, ThinkingLevel, ReferencedFile } from '../../shared/types';
-import type { PhaseThinkingConfig, PhaseModelConfigV3 } from '../../shared/types/settings';
-import { getCurrentPhaseConfigV3 } from '../../shared/utils/phase-config-migration';
+import type { PhaseModelConfig, PhaseThinkingConfig } from '../../shared/types/settings';
 import {
   DEFAULT_AGENT_PROFILES,
   DEFAULT_PHASE_MODELS,
@@ -50,13 +42,6 @@ interface TaskCreationWizardProps {
 // Special value for "use project default" branch
 const PROJECT_DEFAULT_BRANCH = '__project_default__';
 
-interface AutocompleteState {
-  show: boolean;
-  query: string;
-  startPos: number;
-  position: { top: number; left: number };
-}
-
 export function TaskCreationWizard({
   projectId,
   open,
@@ -69,9 +54,6 @@ export function TaskCreationWizard({
   ) || DEFAULT_AGENT_PROFILES.find(p => p.id === 'auto')!;
 
   // Form state
-  // Refs for checking mounted state
-  const isMounted = useRef(false);
-
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -95,6 +77,22 @@ export function TaskCreationWizard({
     return project?.path ?? null;
   }, [projects, projectId]);
 
+  // Convert branches to ComboboxOption[] format for searchable dropdown
+  const branchOptions: ComboboxOption[] = useMemo(() => {
+    const options: ComboboxOption[] = [
+      {
+        value: PROJECT_DEFAULT_BRANCH,
+        label: projectDefaultBranch
+          ? t('tasks:wizard.gitOptions.useProjectDefaultWithBranch', { branch: projectDefaultBranch })
+          : t('tasks:wizard.gitOptions.useProjectDefault')
+      }
+    ];
+    branches.forEach((branch) => {
+      options.push({ value: branch, label: branch });
+    });
+    return options;
+  }, [branches, projectDefaultBranch, t]);
+
   // Classification fields
   const [category, setCategory] = useState<TaskCategory | ''>('');
   const [priority, setPriority] = useState<TaskPriority | ''>('');
@@ -105,15 +103,9 @@ export function TaskCreationWizard({
   const [profileId, setProfileId] = useState<string>(settings.selectedAgentProfile || 'auto');
   const [model, setModel] = useState<ModelType | ''>(selectedProfile.model);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | ''>(selectedProfile.thinkingLevel);
-
-  // Auto profile - per-phase configuration (V3 with ProfileModelPair arrays)
-  // Use migration utility to automatically convert V1/V2 settings to V3
-  const [phaseModelsV3, setPhaseModelsV3] = useState<PhaseModelConfigV3>(() => {
-    // Get active profile ID for migration context
-    const activeProfileId = settings.selectedAgentProfile || 'auto';
-    return getCurrentPhaseConfigV3(settings, selectedProfile.phaseModels || DEFAULT_PHASE_MODELS, activeProfileId);
-  });
-
+  const [phaseModels, setPhaseModels] = useState<PhaseModelConfig | undefined>(
+    settings.customPhaseModels || selectedProfile.phaseModels || DEFAULT_PHASE_MODELS
+  );
   const [phaseThinking, setPhaseThinking] = useState<PhaseThinkingConfig | undefined>(
     settings.customPhaseThinking || selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING
   );
@@ -132,7 +124,12 @@ export function TaskCreationWizard({
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   // Ref to track latest description value (avoids stale closure in handleFileReferenceDrop)
   const descriptionValueRef = useRef(description);
-  const [autocomplete, setAutocomplete] = useState<AutocompleteState | null>(null);
+  const [autocomplete, setAutocomplete] = useState<{
+    show: boolean;
+    query: string;
+    startPos: number;
+    position: { top: number; left: number };
+  } | null>(null);
 
   // Keep description ref in sync for use in callbacks
   useEffect(() => {
@@ -153,16 +150,7 @@ export function TaskCreationWizard({
         setProfileId(draft.profileId || settings.selectedAgentProfile || 'auto');
         setModel(draft.model || selectedProfile.model);
         setThinkingLevel(draft.thinkingLevel || selectedProfile.thinkingLevel);
-
-        // Migrate V1 phase models from draft to V3 if needed
-        if (draft.phaseModels) {
-          const activeProfileId = draft.profileId || settings.selectedAgentProfile || 'auto';
-          setPhaseModelsV3(getCurrentPhaseConfigV3({ customPhaseModels: draft.phaseModels }, DEFAULT_PHASE_MODELS, activeProfileId));
-        } else {
-          const activeProfileId = settings.selectedAgentProfile || 'auto';
-          setPhaseModelsV3(getCurrentPhaseConfigV3(settings, selectedProfile.phaseModels || DEFAULT_PHASE_MODELS, activeProfileId));
-        }
-
+        setPhaseModels(draft.phaseModels || settings.customPhaseModels || selectedProfile.phaseModels || DEFAULT_PHASE_MODELS);
         setPhaseThinking(draft.phaseThinking || settings.customPhaseThinking || selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING);
         setImages(draft.images);
         setReferencedFiles(draft.referencedFiles ?? []);
@@ -173,33 +161,48 @@ export function TaskCreationWizard({
           setShowClassification(true);
         }
       } else {
-        // No draft - initialize from selected profile and custom settings with V3 migration
+        // No draft - reset to clean state for new task creation
+        // This ensures no stale data from previous task creation persists
+        setTitle('');
+        setDescription('');
+        setCategory('');
+        setPriority('');
+        setComplexity('');
+        setImpact('');
         setProfileId(settings.selectedAgentProfile || 'auto');
         setModel(selectedProfile.model);
         setThinkingLevel(selectedProfile.thinkingLevel);
-        const activeProfileId = settings.selectedAgentProfile || 'auto';
-        setPhaseModelsV3(getCurrentPhaseConfigV3(settings, selectedProfile.phaseModels || DEFAULT_PHASE_MODELS, activeProfileId));
+        setPhaseModels(settings.customPhaseModels || selectedProfile.phaseModels || DEFAULT_PHASE_MODELS);
         setPhaseThinking(settings.customPhaseThinking || selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING);
+        setImages([]);
+        setReferencedFiles([]);
+        setRequireReviewBeforeCoding(false);
+        setBaseBranch(PROJECT_DEFAULT_BRANCH);
+        setUseWorktree(true);
+        setIsDraftRestored(false);
+        setShowClassification(false);
+        setShowFileExplorer(false);
+        setShowGitOptions(false);
       }
     }
   }, [open, projectId, settings.selectedAgentProfile, settings.customPhaseModels, settings.customPhaseThinking, selectedProfile.model, selectedProfile.thinkingLevel, selectedProfile.phaseModels, selectedProfile.phaseThinking]);
 
   // Fetch branches when dialog opens
   useEffect(() => {
-    isMounted.current = true;
+    let isMounted = true;
 
     const fetchBranches = async () => {
       if (!projectPath) return;
-      if (isMounted.current) setIsLoadingBranches(true);
+      if (isMounted) setIsLoadingBranches(true);
       try {
         const result = await window.electronAPI.getGitBranches(projectPath);
-        if (isMounted.current && result.success && result.data) {
+        if (isMounted && result.success && result.data) {
           setBranches(result.data);
         }
       } catch (err) {
         console.error('Failed to fetch branches:', err);
       } finally {
-        if (isMounted.current) setIsLoadingBranches(false);
+        if (isMounted) setIsLoadingBranches(false);
       }
     };
 
@@ -207,11 +210,11 @@ export function TaskCreationWizard({
       if (!projectId) return;
       try {
         const result = await window.electronAPI.getProjectEnv(projectId);
-        if (isMounted.current && result.success && result.data?.defaultBranch) {
+        if (isMounted && result.success && result.data?.defaultBranch) {
           setProjectDefaultBranch(result.data.defaultBranch);
         } else if (projectPath) {
           const detectResult = await window.electronAPI.detectMainBranch(projectPath);
-          if (isMounted.current && detectResult.success && detectResult.data) {
+          if (isMounted && detectResult.success && detectResult.data) {
             setProjectDefaultBranch(detectResult.data);
           }
         }
@@ -226,13 +229,12 @@ export function TaskCreationWizard({
     }
 
     return () => {
-      isMounted.current = false;
+      isMounted = false;
     };
   }, [open, projectPath, projectId]);
 
   /**
    * Get current form state as a draft
-   * Note: Drafts still use V1 format for backward compatibility
    */
   const getCurrentDraft = useCallback((): TaskDraft => ({
     projectId,
@@ -245,19 +247,13 @@ export function TaskCreationWizard({
     profileId,
     model,
     thinkingLevel,
-    // Convert V3 to V1 for draft storage (use primary model from each phase)
-    phaseModels: {
-      spec: (phaseModelsV3.spec[0]?.model as ModelType) || 'opus',
-      planning: (phaseModelsV3.planning[0]?.model as ModelType) || 'opus',
-      coding: (phaseModelsV3.coding[0]?.model as ModelType) || 'opus',
-      qa: (phaseModelsV3.qa[0]?.model as ModelType) || 'opus'
-    },
+    phaseModels,
     phaseThinking,
     images,
     referencedFiles,
     requireReviewBeforeCoding,
     savedAt: new Date()
-  }), [projectId, title, description, category, priority, complexity, impact, profileId, model, thinkingLevel, phaseModelsV3, phaseThinking, images, referencedFiles, requireReviewBeforeCoding]);
+  }), [projectId, title, description, category, priority, complexity, impact, profileId, model, thinkingLevel, phaseModels, phaseThinking, images, referencedFiles, requireReviewBeforeCoding]);
 
   /**
    * Detect @ mention being typed and show autocomplete
@@ -276,13 +272,6 @@ export function TaskCreationWizard({
    */
   const handleDescriptionChange = useCallback((newValue: string) => {
     const textarea = descriptionRef.current;
-
-    // Safety check for unsynced ref
-    if (!textarea) {
-      setDescription(newValue);
-      return;
-    }
-
     const cursorPos = textarea?.selectionStart || 0;
 
     setDescription(newValue);
@@ -425,14 +414,9 @@ export function TaskCreationWizard({
       if (impact) metadata.impact = impact;
       if (model) metadata.model = model;
       if (thinkingLevel) metadata.thinkingLevel = thinkingLevel;
-
-      // All profiles now support per-phase configuration
-      // isAutoProfile indicates task uses phase-specific models/thinking
-      // Note: We pass V3 config which backend will use directly
-      if (phaseModelsV3 && phaseThinking) {
-        metadata.isAutoProfile = true;
-        // Store V3 config directly - backend expects this
-        metadata.phaseModelsV3 = phaseModelsV3;
+      if (phaseModels && phaseThinking) {
+        metadata.isAutoProfile = profileId === 'auto';
+        metadata.phaseModels = phaseModels;
         metadata.phaseThinking = phaseThinking;
       }
       if (images.length > 0) metadata.attachedImages = images;
@@ -471,15 +455,11 @@ export function TaskCreationWizard({
     setPriority('');
     setComplexity('');
     setImpact('');
-
-    // Reset to selected profile defaults and custom settings with V3 migration
     setProfileId(settings.selectedAgentProfile || 'auto');
     setModel(selectedProfile.model);
     setThinkingLevel(selectedProfile.thinkingLevel);
-    const activeProfileId = settings.selectedAgentProfile || 'auto';
-    setPhaseModelsV3(getCurrentPhaseConfigV3(settings, selectedProfile.phaseModels || DEFAULT_PHASE_MODELS, activeProfileId));
+    setPhaseModels(settings.customPhaseModels || selectedProfile.phaseModels || DEFAULT_PHASE_MODELS);
     setPhaseThinking(settings.customPhaseThinking || selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING);
-
     setImages([]);
     setReferencedFiles([]);
     setRequireReviewBeforeCoding(false);
@@ -640,7 +620,7 @@ export function TaskCreationWizard({
           profileId={profileId}
           model={model}
           thinkingLevel={thinkingLevel}
-          phaseModelsV3={phaseModelsV3}
+          phaseModels={phaseModels}
           phaseThinking={phaseThinking}
           onProfileChange={(newProfileId, newModel, newThinkingLevel) => {
             setProfileId(newProfileId);
@@ -649,7 +629,7 @@ export function TaskCreationWizard({
           }}
           onModelChange={setModel}
           onThinkingLevelChange={setThinkingLevel}
-          onPhaseModelsV3Change={setPhaseModelsV3}
+          onPhaseModelsChange={setPhaseModels}
           onPhaseThinkingChange={setPhaseThinking}
           category={category}
           priority={priority}
@@ -718,55 +698,23 @@ export function TaskCreationWizard({
               <Label htmlFor="base-branch" className="text-sm font-medium text-foreground">
                 {t('tasks:wizard.gitOptions.baseBranchLabel')}
               </Label>
-              <Select
+              <Combobox
+                id="base-branch"
                 value={baseBranch}
                 onValueChange={setBaseBranch}
+                options={branchOptions}
+                placeholder={projectDefaultBranch
+                  ? t('tasks:wizard.gitOptions.useProjectDefaultWithBranch', { branch: projectDefaultBranch })
+                  : t('tasks:wizard.gitOptions.useProjectDefault')
+                }
+                searchPlaceholder={t('tasks:wizard.gitOptions.searchBranches')}
+                emptyMessage={t('tasks:wizard.gitOptions.noBranchesFound')}
                 disabled={isCreating || isLoadingBranches}
-              >
-                <SelectTrigger id="base-branch" className="h-9">
-                  <SelectValue placeholder={projectDefaultBranch
-                    ? t('tasks:wizard.gitOptions.useProjectDefaultWithBranch', { branch: projectDefaultBranch })
-                    : t('tasks:wizard.gitOptions.useProjectDefault')
-                  } />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={PROJECT_DEFAULT_BRANCH}>
-                    {projectDefaultBranch
-                      ? t('tasks:wizard.gitOptions.useProjectDefaultWithBranch', { branch: projectDefaultBranch })
-                      : t('tasks:wizard.gitOptions.useProjectDefault')
-                    }
-                  </SelectItem>
-                  {branches.map((branch) => (
-                    <SelectItem key={branch} value={branch}>
-                      {branch}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                className="h-9"
+              />
               <p className="text-xs text-muted-foreground">
                 {t('tasks:wizard.gitOptions.helpText')}
               </p>
-            </div>
-
-            {/* Workspace Isolation Toggle */}
-            <div className="flex items-start space-x-3 pt-2 border-t border-border/50">
-              <Checkbox
-                id="use-worktree"
-                checked={useWorktree}
-                onCheckedChange={(checked) => setUseWorktree(checked === true)}
-                disabled={isCreating}
-              />
-              <div className="grid gap-1.5 leading-none">
-                <Label
-                  htmlFor="use-worktree"
-                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                >
-                  {t('tasks:wizard.gitOptions.useWorktreeLabel')}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  {t('tasks:wizard.gitOptions.useWorktreeDescription')}
-                </p>
-              </div>
             </div>
           </div>
         )}

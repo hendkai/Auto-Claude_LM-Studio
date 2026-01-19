@@ -29,10 +29,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { SettingsSection } from './SettingsSection';
 import { loadClaudeProfiles as loadGlobalClaudeProfiles } from '../../stores/claude-profile-store';
 import { useClaudeLoginTerminal } from '../../hooks/useClaudeLoginTerminal';
-
 import { useToast } from '../../hooks/use-toast';
-import { debugLog, debugError } from '../../../shared/utils/debug-logger';
-import type { AppSettings, ClaudeProfile, ClaudeAutoSwitchSettings, ClaudeUsageSnapshot } from '../../../shared/types';
+import type { AppSettings, ClaudeProfile, ClaudeAutoSwitchSettings } from '../../../shared/types';
 
 interface IntegrationSettingsProps {
   settings: AppSettings;
@@ -81,9 +79,6 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
   // Listen for login terminal creation - makes the terminal visible so user can see OAuth flow
   useClaudeLoginTerminal();
 
-  // Usage stats state
-  const [usageStats, setUsageStats] = useState<ClaudeUsageSnapshot | null>(null);
-
   // Listen for OAuth authentication completion
   useEffect(() => {
     const unsubscribe = window.electronAPI.onTerminalOAuthToken(async (info) => {
@@ -95,29 +90,36 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
           title: t('integrations.toast.authSuccess'),
           description: info.email ? t('integrations.toast.authSuccessWithEmail', { email: info.email }) : t('integrations.toast.authSuccessGeneric'),
         });
+      } else if (!info.success) {
+        // Handle authentication failure
+        await loadClaudeProfiles();
+
+        const errorMessage = info.message || '';
+        let title = t('integrations.toast.authStartFailed');
+        let description = t('integrations.toast.tryAgain');
+
+        // Provide specific error messages based on error type
+        if (errorMessage.toLowerCase().includes('cancelled') || errorMessage.toLowerCase().includes('timeout')) {
+          title = t('integrations.toast.authProcessFailed');
+          description = errorMessage || t('integrations.toast.authProcessFailedDescription');
+        } else if (errorMessage.toLowerCase().includes('invalid') || errorMessage.toLowerCase().includes('token')) {
+          title = t('integrations.toast.tokenSaveFailed');
+          description = errorMessage || t('integrations.toast.tryAgain');
+        } else if (errorMessage) {
+          title = t('integrations.toast.authProcessFailed');
+          description = errorMessage;
+        }
+
+        toast({
+          variant: 'destructive',
+          title,
+          description,
+        });
       }
     });
 
     return unsubscribe;
   }, [t, toast]);
-
-  // Listen for usage updates
-  useEffect(() => {
-    const unsubscribe = window.electronAPI.onUsageUpdated((snapshot: ClaudeUsageSnapshot) => {
-      setUsageStats(snapshot);
-    });
-
-    // Request initial usage
-    if (isOpen) {
-      window.electronAPI.requestUsageUpdate().then((result) => {
-        if (result.success && result.data) {
-          setUsageStats(result.data);
-        }
-      });
-    }
-
-    return unsubscribe;
-  }, [isOpen]);
 
   const loadClaudeProfiles = async () => {
     setIsLoadingProfiles(true);
@@ -128,16 +130,29 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
         setActiveProfileId(result.data.activeProfileId);
         // Also update the global store
         await loadGlobalClaudeProfiles();
+      } else if (!result.success) {
+        toast({
+          variant: 'destructive',
+          title: t('integrations.toast.loadProfilesFailed'),
+          description: result.error || t('integrations.toast.tryAgain'),
+        });
       }
     } catch (err) {
-      debugError('[IntegrationSettings] Failed to load Claude profiles:', err);
+      console.warn('[IntegrationSettings] Failed to load Claude profiles:', err);
+      toast({
+        variant: 'destructive',
+        title: t('integrations.toast.loadProfilesFailed'),
+        description: t('integrations.toast.tryAgain'),
+      });
     } finally {
       setIsLoadingProfiles(false);
     }
   };
 
   const handleAddProfile = async () => {
-    if (!newProfileName.trim()) return;
+    if (!newProfileName.trim()) {
+      return;
+    }
 
     setIsAddingProfile(true);
     try {
@@ -163,15 +178,31 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
           // Users can see the 'claude setup-token' output directly
         } else {
           await loadClaudeProfiles();
+          setNewProfileName('');
+
+          const errorMessage = initResult.error || '';
+          let title = t('integrations.toast.profileCreatedAuthFailed');
+          let description = t('integrations.toast.profileCreatedAuthFailedDescription');
+
+          if (errorMessage.toLowerCase().includes('max terminals')) {
+            title = t('integrations.toast.maxTerminalsReached');
+            description = t('integrations.toast.maxTerminalsReachedDescription');
+          } else if (errorMessage.toLowerCase().includes('terminal creation')) {
+            title = t('integrations.toast.terminalCreationFailed');
+            description = t('integrations.toast.terminalCreationFailedDescription', { error: errorMessage });
+          } else if (errorMessage.toLowerCase().includes('terminal')) {
+            title = t('integrations.toast.terminalError');
+            description = t('integrations.toast.terminalErrorDescription', { error: errorMessage });
+          }
+
           toast({
             variant: 'destructive',
-            title: t('integrations.toast.authStartFailed'),
-            description: initResult.error || t('integrations.toast.tryAgain'),
+            title,
+            description,
           });
         }
       }
     } catch (err) {
-      debugError('[IntegrationSettings] Failed to add profile:', err);
       toast({
         variant: 'destructive',
         title: t('integrations.toast.addProfileFailed'),
@@ -188,9 +219,20 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
       const result = await window.electronAPI.deleteClaudeProfile(profileId);
       if (result.success) {
         await loadClaudeProfiles();
+      } else {
+        toast({
+          variant: 'destructive',
+          title: t('integrations.toast.deleteProfileFailed'),
+          description: result.error || t('integrations.toast.tryAgain'),
+        });
       }
     } catch (err) {
-      debugError('[IntegrationSettings] Failed to delete profile:', err);
+      console.warn('[IntegrationSettings] Failed to delete profile:', err);
+      toast({
+        variant: 'destructive',
+        title: t('integrations.toast.deleteProfileFailed'),
+        description: t('integrations.toast.tryAgain'),
+      });
     } finally {
       setDeletingProfileId(null);
     }
@@ -213,9 +255,20 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
       const result = await window.electronAPI.renameClaudeProfile(editingProfileId, editingProfileName.trim());
       if (result.success) {
         await loadClaudeProfiles();
+      } else {
+        toast({
+          variant: 'destructive',
+          title: t('integrations.toast.renameProfileFailed'),
+          description: result.error || t('integrations.toast.tryAgain'),
+        });
       }
     } catch (err) {
-      debugError('[IntegrationSettings] Failed to rename profile:', err);
+      console.warn('[IntegrationSettings] Failed to rename profile:', err);
+      toast({
+        variant: 'destructive',
+        title: t('integrations.toast.renameProfileFailed'),
+        description: t('integrations.toast.tryAgain'),
+      });
     } finally {
       setEditingProfileId(null);
       setEditingProfileName('');
@@ -228,37 +281,64 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
       if (result.success) {
         setActiveProfileId(profileId);
         await loadGlobalClaudeProfiles();
+      } else {
+        toast({
+          variant: 'destructive',
+          title: t('integrations.toast.setActiveProfileFailed'),
+          description: result.error || t('integrations.toast.tryAgain'),
+        });
       }
     } catch (err) {
-      debugError('[IntegrationSettings] Failed to set active profile:', err);
+      console.warn('[IntegrationSettings] Failed to set active profile:', err);
+      toast({
+        variant: 'destructive',
+        title: t('integrations.toast.setActiveProfileFailed'),
+        description: t('integrations.toast.tryAgain'),
+      });
     }
   };
 
   const handleAuthenticateProfile = async (profileId: string) => {
-    debugLog('[IntegrationSettings] handleAuthenticateProfile called for:', profileId);
     setAuthenticatingProfileId(profileId);
     try {
-      debugLog('[IntegrationSettings] Calling initializeClaudeProfile IPC...');
       const initResult = await window.electronAPI.initializeClaudeProfile(profileId);
-      debugLog('[IntegrationSettings] IPC returned:', initResult);
       if (!initResult.success) {
+        const errorMessage = initResult.error || '';
+        let title: string;
+        let description: string;
+
+        if (errorMessage.toLowerCase().includes('max terminals')) {
+          title = t('integrations.toast.maxTerminalsReached');
+          description = t('integrations.toast.maxTerminalsReachedDescription');
+        } else if (errorMessage.toLowerCase().includes('terminal creation')) {
+          title = t('integrations.toast.terminalCreationFailed');
+          description = t('integrations.toast.terminalCreationFailedDescription', { error: errorMessage });
+        } else if (errorMessage.toLowerCase().includes('terminal')) {
+          title = t('integrations.toast.terminalError');
+          description = t('integrations.toast.terminalErrorDescription', { error: errorMessage });
+        } else if (errorMessage) {
+          title = t('integrations.toast.authProcessFailed');
+          description = errorMessage;
+        } else {
+          title = t('integrations.toast.authProcessFailed');
+          description = t('integrations.toast.authProcessFailedDescription');
+        }
+
         toast({
           variant: 'destructive',
-          title: t('integrations.toast.authStartFailed'),
-          description: initResult.error || t('integrations.toast.tryAgain'),
+          title,
+          description,
         });
       }
       // Note: If successful, the terminal is now visible in the UI via the onTerminalAuthCreated event
       // Users can see the 'claude setup-token' output and complete OAuth flow directly
     } catch (err) {
-      debugError('[IntegrationSettings] Failed to authenticate profile:', err);
       toast({
         variant: 'destructive',
         title: t('integrations.toast.authStartFailed'),
         description: t('integrations.toast.tryAgain'),
       });
     } finally {
-      debugLog('[IntegrationSettings] finally block - clearing authenticatingProfileId');
       setAuthenticatingProfileId(null);
     }
   };
@@ -305,7 +385,6 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
         });
       }
     } catch (err) {
-      debugError('[IntegrationSettings] Failed to save token:', err);
       toast({
         variant: 'destructive',
         title: t('integrations.toast.tokenSaveFailed'),
@@ -325,7 +404,7 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
         setAutoSwitchSettings(result.data);
       }
     } catch (err) {
-      debugError('[IntegrationSettings] Failed to load auto-switch settings:', err);
+      // Silently handle errors
     } finally {
       setIsLoadingAutoSwitch(false);
     }
@@ -346,7 +425,6 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
         });
       }
     } catch (err) {
-      debugError('[IntegrationSettings] Failed to update auto-switch settings:', err);
       toast({
         variant: 'destructive',
         title: t('integrations.toast.settingsUpdateFailed'),
@@ -821,90 +899,6 @@ export function IntegrationSettings({ settings, onSettingsChange, isOpen }: Inte
             </div>
           </div>
         )}
-
-        {/* Local LM Studio Section */}
-        <div className="space-y-4 pt-4 border-t border-border">
-          <div className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-muted-foreground" />
-            <h4 className="text-sm font-semibold text-foreground">Local Models (LM Studio)</h4>
-          </div>
-
-          <div className="rounded-lg bg-muted/30 border border-border p-4 space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Connect to your local LM Studio instance to use offline models.
-              Ensures privacy and zero latency.
-            </p>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="localLmStudioUrl" className="text-sm font-medium">
-                  Base URL
-                </Label>
-                <Input
-                  id="localLmStudioUrl"
-                  placeholder="http://localhost:1234/v1"
-                  value={settings.localLmStudioUrl || ''}
-                  onChange={(e) =>
-                    onSettingsChange({ ...settings, localLmStudioUrl: e.target.value || undefined })
-                  }
-                  className="font-mono text-sm"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="localLmStudioApiKey" className="text-sm font-medium">
-                  API Key (Optional)
-                </Label>
-                <Input
-                  id="localLmStudioApiKey"
-                  type="password"
-                  placeholder="lm-studio"
-                  value={settings.localLmStudioApiKey || ''}
-                  onChange={(e) =>
-                    onSettingsChange({ ...settings, localLmStudioApiKey: e.target.value || undefined })
-                  }
-                  className="font-mono text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={async () => {
-                  const url = settings.localLmStudioUrl || 'http://localhost:1234/v1';
-                  const key = settings.localLmStudioApiKey || 'lm-studio';
-                  toast({ title: 'Testing connection...', description: `Connecting to ${url}` });
-                  try {
-                    const result = await window.electronAPI.discoverModels(url, key);
-                    if (result.success && result.data && result.data.models.length > 0) {
-                      toast({
-                        title: 'Connection Successful',
-                        description: `Found ${result.data.models.length} local models: ${result.data.models.map(m => m.id).join(', ')}`,
-                      });
-                    } else {
-                      toast({
-                        variant: 'destructive',
-                        title: 'Connection Failed',
-                        description: result.error || 'No models found. Is LM Studio running and server started?',
-                      });
-                    }
-                  } catch (e) {
-                    toast({
-                      variant: 'destructive',
-                      title: 'Connection Error',
-                      description: e instanceof Error ? e.message : 'Unknown error',
-                    });
-                  }
-                }}
-              >
-                <RefreshCw className="mr-2 h-3.5 w-3.5" />
-                Test Connection & Discover Models
-              </Button>
-            </div>
-          </div>
-        </div>
 
         {/* API Keys Section */}
         <div className="space-y-4 pt-4 border-t border-border">

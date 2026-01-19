@@ -486,16 +486,8 @@ export function registerSettingsHandlers(
           });
         } else {
           // Linux: Try common terminal emulators with argument arrays
-          // Prioritize Wayland terminals first, then X11 terminals
           // Note: xterm uses cwd option to avoid shell injection vulnerabilities
           const terminals: Array<{ cmd: string; args: string[]; useCwd?: boolean }> = [
-            // Wayland terminals
-            { cmd: 'foot', args: ['--working-directory', resolvedPath, 'bash'] },
-            { cmd: 'kitty', args: ['--directory', resolvedPath, 'bash'] },
-            { cmd: 'alacritty', args: ['--working-directory', resolvedPath, '-e', 'bash'] },
-            { cmd: 'wezterm', args: ['start', '--cwd', resolvedPath, '--', 'bash'] },
-            // X11 terminals
-            { cmd: 'x-terminal-emulator', args: ['--working-directory', resolvedPath, '-e', 'bash'] },
             { cmd: 'gnome-terminal', args: ['--working-directory', resolvedPath] },
             { cmd: 'konsole', args: ['--workdir', resolvedPath] },
             { cmd: 'xfce4-terminal', args: ['--working-directory', resolvedPath] },
@@ -503,7 +495,6 @@ export function registerSettingsHandlers(
           ];
 
           let opened = false;
-          let lastError: string | null = null;
           for (const { cmd, args, useCwd } of terminals) {
             try {
               execFileSync(cmd, args, {
@@ -511,20 +502,15 @@ export function registerSettingsHandlers(
                 ...(useCwd ? { cwd: resolvedPath } : {})
               });
               opened = true;
-              console.log('[Settings] Opened terminal:', cmd);
               break;
-            } catch (error) {
-              lastError = error instanceof Error ? error.message : String(error);
-              console.warn(`[Settings] Failed to open ${cmd}:`, lastError);
-              // Try next terminal
-              continue;
+            } catch {
             }
           }
 
           if (!opened) {
             return {
               success: false,
-              error: `No supported terminal emulator found. Please install foot, kitty, alacritty, gnome-terminal, konsole, xfce4-terminal, or xterm.${lastError ? ` Last error: ${lastError}` : ''}`
+              error: 'No supported terminal emulator found. Please install gnome-terminal, konsole, xfce4-terminal, or xterm.'
             };
           }
         }

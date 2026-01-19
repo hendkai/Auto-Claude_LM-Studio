@@ -8,7 +8,7 @@
  */
 
 import { ipcMain } from 'electron';
-import { execFileSync, spawn, execFile } from 'child_process';
+import { exec, execFileSync, spawn, execFile } from 'child_process';
 import { existsSync, promises as fsPromises } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -502,8 +502,6 @@ export async function openTerminalWithCommand(command: string): Promise<void> {
 
     // For Windows, use exec with a properly formed command string
     // This is more reliable than spawn for complex PowerShell commands with pipes
-    const { exec } = require('child_process');
-
     const runWindowsCommand = (cmdString: string): Promise<void> => {
       return new Promise((resolve) => {
         console.log(`[Claude Code] Executing: ${cmdString}`);
@@ -672,13 +670,8 @@ export async function openTerminalWithCommand(command: string): Promise<void> {
 
     // Try to use preferred terminal if specified
     if (terminalId === 'gnometerminal') {
-      try {
-        spawn('gnome-terminal', ['--', 'bash', '-c', bashCommand], { detached: true, stdio: 'ignore' }).unref();
-        return;
-      } catch (error) {
-        console.error('[Claude Code] Failed to open gnome-terminal:', error);
-        // Fall through to auto-detect
-      }
+      spawn('gnome-terminal', ['--', 'bash', '-c', bashCommand], { detached: true, stdio: 'ignore' }).unref();
+      return;
     } else if (terminalId === 'konsole') {
       spawn('konsole', ['-e', 'bash', '-c', bashCommand], { detached: true, stdio: 'ignore' }).unref();
       return;
@@ -733,42 +726,30 @@ export async function openTerminalWithCommand(command: string): Promise<void> {
     }
 
     // Auto-detect (for 'system' or no preference): try common terminal emulators in order
-    // Prioritize Wayland terminals first, then X11 terminals
     const terminals: Array<{ cmd: string; args: string[] }> = [
-      // Wayland terminals (common on modern Linux)
-      { cmd: 'foot', args: ['bash', '-c', bashCommand] },
-      { cmd: 'kitty', args: ['--', 'bash', '-c', bashCommand] },
-      { cmd: 'alacritty', args: ['-e', 'bash', '-c', bashCommand] },
-      { cmd: 'wezterm', args: ['start', '--', 'bash', '-c', bashCommand] },
-      // X11 terminals
-      { cmd: 'x-terminal-emulator', args: ['-e', 'bash', '-c', bashCommand] },
       { cmd: 'gnome-terminal', args: ['--', 'bash', '-c', bashCommand] },
       { cmd: 'konsole', args: ['-e', 'bash', '-c', bashCommand] },
       { cmd: 'xfce4-terminal', args: ['-e', `bash -c "${bashCommand}"`] },
       { cmd: 'tilix', args: ['-e', 'bash', '-c', bashCommand] },
       { cmd: 'terminator', args: ['-e', `bash -c "${bashCommand}"`] },
+      { cmd: 'kitty', args: ['--', 'bash', '-c', bashCommand] },
+      { cmd: 'alacritty', args: ['-e', 'bash', '-c', bashCommand] },
       { cmd: 'xterm', args: ['-e', 'bash', '-c', bashCommand] },
     ];
 
     let opened = false;
-    let lastError: Error | null = null;
     for (const { cmd, args } of terminals) {
       try {
         spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
         opened = true;
         console.log('[Claude Code] Opened terminal:', cmd);
         break;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        console.warn(`[Claude Code] Failed to open ${cmd}:`, lastError.message);
-        continue;
+      } catch {
       }
     }
 
     if (!opened) {
-      const errorMsg = lastError ? `: ${lastError.message}` : '';
-      console.error('[Claude Code] No terminal emulator found', errorMsg);
-      throw new Error(`No supported terminal emulator found${errorMsg}`);
+      throw new Error('No supported terminal emulator found');
     }
   }
 }
