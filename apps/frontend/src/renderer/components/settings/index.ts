@@ -11,3 +11,11 @@ export { IntegrationSettings } from './IntegrationSettings';
 export { AdvancedSettings } from './AdvancedSettings';
 export { SettingsSection } from './SettingsSection';
 export { useSettings } from './hooks/useSettings';
+
+// LLM Provider exports
+export { LLMProviderSettingsPage } from './LLMProviderSettingsPage';
+export { LLMProviderList } from './LLMProviderList';
+export { LLMProviderCard } from './LLMProviderCard';
+export { LLMProviderConfigModal } from './LLMProviderConfigModal';
+export { PhaseModelConfiguration } from './PhaseModelConfiguration';
+export { CLIToolsIntegration } from './CLIToolsIntegration';

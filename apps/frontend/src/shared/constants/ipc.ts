@@ -529,6 +529,28 @@ export const IPC_CHANNELS = {
   CLAUDE_CODE_GET_INSTALLATIONS: 'claudeCode:getInstallations',
   CLAUDE_CODE_SET_ACTIVE_PATH: 'claudeCode:setActivePath',
 
+  // Codex CLI operations
+  CODEX_CHECK_VERSION: 'codex:checkVersion',
+  CODEX_INSTALL: 'codex:install',
+
+  // Kimi Code CLI operations
+  KIMI_CODE_CHECK_VERSION: 'kimiCode:checkVersion',
+  KIMI_CODE_INSTALL: 'kimiCode:install',
+
+  // LLM Provider operations
+  LLM_PROVIDER_LIST: 'llmProvider:list',
+  LLM_PROVIDER_ADD: 'llmProvider:add',
+  LLM_PROVIDER_UPDATE: 'llmProvider:update',
+  LLM_PROVIDER_DELETE: 'llmProvider:delete',
+  LLM_PROVIDER_TEST: 'llmProvider:test',
+  LLM_PROVIDER_GET_MODELS: 'llmProvider:getModels',
+  LLM_PROVIDER_GET_USAGE: 'llmProvider:getUsage',
+
+  // LLM Routing operations
+  LLM_ROUTE_COMPLETION: 'llm:routeCompletion',
+  LLM_ROUTE_STREAM: 'llm:routeStream',
+  LLM_GET_ROUTING_STATUS: 'llm:getRoutingStatus',
+
   // MCP Server health checks
   MCP_CHECK_HEALTH: 'mcp:checkHealth',           // Quick connectivity check
   MCP_TEST_CONNECTION: 'mcp:testConnection',     // Full MCP protocol test

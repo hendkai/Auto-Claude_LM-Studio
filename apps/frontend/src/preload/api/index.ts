@@ -11,6 +11,9 @@ import { GitHubAPI, createGitHubAPI } from './modules/github-api';
 import type { GitLabAPI } from './modules/gitlab-api';
 import { DebugAPI, createDebugAPI } from './modules/debug-api';
 import { ClaudeCodeAPI, createClaudeCodeAPI } from './modules/claude-code-api';
+import { CodexAPI, createCodexAPI } from './modules/codex-api';
+import { KimiCodeAPI, createKimiCodeAPI } from './modules/kimi-code-api';
+import { LLMProviderAPI, createLLMProviderAPI } from './modules/llm-provider-api';
 import { McpAPI, createMcpAPI } from './modules/mcp-api';
 import { ProfileAPI, createProfileAPI } from './profile-api';
 import { GiteaAPI, createGiteaAPI } from './modules/gitea-api';
@@ -29,7 +32,9 @@ export interface ElectronAPI extends
   GitLabAPI,
   DebugAPI,
   ClaudeCodeAPI,
-  ClaudeCodeAPI,
+  CodexAPI,
+  KimiCodeAPI,
+  LLMProviderAPI,
   McpAPI,
   ProfileAPI,
   GiteaAPI,
@@ -47,7 +52,9 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createAppUpdateAPI(),
   ...createDebugAPI(),
   ...createClaudeCodeAPI(),
-  ...createMcpAPI(),
+  ...createCodexAPI(),
+  ...createKimiCodeAPI(),
+  ...createLLMProviderAPI(),
   ...createMcpAPI(),
   ...createProfileAPI(),
   ...createGiteaAPI(),
@@ -69,6 +76,9 @@ export {
   createGitHubAPI,
   createDebugAPI,
   createClaudeCodeAPI,
+  createCodexAPI,
+  createKimiCodeAPI,
+  createLLMProviderAPI,
   createMcpAPI,
   createGiteaAPI,
   createNetworkAPI
@@ -89,6 +99,9 @@ export type {
   GitLabAPI,
   DebugAPI,
   ClaudeCodeAPI,
+  CodexAPI,
+  KimiCodeAPI,
+  LLMProviderAPI,
   McpAPI,
   GiteaAPI,
   NetworkAPI

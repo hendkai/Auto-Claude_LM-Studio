@@ -31,6 +31,9 @@ import { registerMemoryHandlers } from './memory-handlers';
 import { registerAppUpdateHandlers } from './app-update-handlers';
 import { registerDebugHandlers } from './debug-handlers';
 import { registerClaudeCodeHandlers } from './claude-code-handlers';
+import { registerCodexHandlers } from './codex-handlers';
+import { registerKimiCodeHandlers } from './kimi-code-handlers';
+import { registerLLMProviderHandlers } from './llm-provider-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
 import { registerProfileHandlers } from './profile-handlers';
 import { registerLiteLLMHandlers } from './litellm-handlers';
@@ -117,6 +120,15 @@ export function setupIpcHandlers(
   // Claude Code CLI handlers (version checking, installation)
   registerClaudeCodeHandlers();
 
+  // Codex CLI handlers (version checking, installation)
+  registerCodexHandlers();
+
+  // Kimi Code CLI handlers (version checking, installation)
+  registerKimiCodeHandlers();
+
+  // LLM Provider handlers (multi-provider management and routing)
+  registerLLMProviderHandlers();
+
   // MCP server health check handlers
   registerMcpHandlers();
 
@@ -152,6 +164,9 @@ export {
   registerAppUpdateHandlers,
   registerDebugHandlers,
   registerClaudeCodeHandlers,
+  registerCodexHandlers,
+  registerKimiCodeHandlers,
+  registerLLMProviderHandlers,
   registerMcpHandlers,
   registerProfileHandlers
 };

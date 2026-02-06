@@ -1,3 +1,26 @@
+## Unreleased - CLI Tools Integration & LLM Provider Settings
+
+### ✨ New Features
+
+- **CLI Tools Integration**: New section in Settings showing status of all CLI coding agents:
+  - Claude Code (Anthropic) - with version check, install/update buttons
+  - Kimi Code (Moonshot AI) - with version check, install/update buttons  
+  - Codex (OpenAI) - with version check, install/update buttons
+- **Unified Integrations Page**: Settings → Integrations now shows:
+  - CLI Tools (local coding agents)
+  - Claude Accounts (OAuth-based account management)
+  - API Integrations (LLM providers with API keys)
+- **LLM Provider Store**: New Zustand store for managing multiple LLM providers
+- **Phase-based Model Routing**: Configure which models to use for spec/planning/coding/QA phases
+
+### 🛠️ Improvements
+
+- Replaced single API key input with comprehensive LLM provider management
+- Better separation between CLI tools (local) and API integrations (cloud)
+- Updated i18n translations for new integration sections
+
+---
+
 ## 2.7.9 - GUI Commit/Stash and Terminal Error Handling
 
 ## 2.7.4 - Terminal & Workflow Enhancements

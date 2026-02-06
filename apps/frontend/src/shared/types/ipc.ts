@@ -805,6 +805,14 @@ export interface ElectronAPI {
   getClaudeCodeInstallations: () => Promise<IPCResult<import('./cli').ClaudeInstallationList>>;
   setClaudeCodeActivePath: (cliPath: string) => Promise<IPCResult<{ path: string }>>;
 
+  // Codex CLI operations
+  checkCodexVersion: () => Promise<IPCResult<import('./cli').CodexVersionInfo>>;
+  installCodex: () => Promise<IPCResult<{ command: string }>>;
+
+  // Kimi Code CLI operations
+  checkKimiCodeVersion: () => Promise<IPCResult<import('./cli').KimiCodeVersionInfo>>;
+  installKimiCode: () => Promise<IPCResult<{ command: string }>>;
+
   // Debug operations
   getDebugInfo: () => Promise<{
     systemInfo: Record<string, string>;
