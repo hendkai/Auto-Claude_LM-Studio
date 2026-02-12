@@ -292,9 +292,14 @@ const ALLOWED_PATH_PATTERNS: RegExp[] = [
   // Bundled Python in packaged Electron apps (macOS/Linux)
   // Matches paths like: /path/to/app/resources/python/bin/python3
   /^.*\/resources\/python\/bin\/python\d*(\.\d+)?$/,
+  // Bundled Python in local development runtime bundles
+  // Matches paths like: /path/to/project/apps/frontend/python-runtime/mac-arm64/python/bin/python3.12
+  /^.*\/python-runtime\/[^/]+\/python\/bin\/python\d*(\.\d+)?$/,
   // Bundled Python in packaged Electron apps (Windows)
   // Matches paths like: C:\path\to\app\resources\python\python.exe
   /^.*\\resources\\python\\python\.exe$/i,
+  // Bundled Python in local development runtime bundles (Windows)
+  /^.*\\python-runtime\\[^\\]+\\python\\python\.exe$/i,
 ];
 
 /**

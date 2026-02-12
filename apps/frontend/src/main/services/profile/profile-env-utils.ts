@@ -259,14 +259,17 @@ async function getFirstMatchingAPIProfileEnv(
 }
 
 async function getExternalCliPath(cliToolId: string): Promise<string | null> {
-    if (cliToolId !== 'kimi-code') {
-        return null;
-    }
-
     try {
-        const toolInfo = await getToolInfoAsync('kimi');
-        if (toolInfo.found && toolInfo.path) {
-            return toolInfo.path;
+        if (cliToolId === 'kimi-code') {
+            const toolInfo = await getToolInfoAsync('kimi');
+            if (toolInfo.found && toolInfo.path) {
+                return toolInfo.path;
+            }
+        } else if (cliToolId === 'codex') {
+            const toolInfo = await getToolInfoAsync('codex');
+            if (toolInfo.found && toolInfo.path) {
+                return toolInfo.path;
+            }
         }
     } catch (error) {
         console.warn(`[ProfileEnv] Failed to detect CLI path for ${cliToolId}:`, error);
@@ -307,6 +310,16 @@ async function getCLIProfileEnv(
         }
 
         if (cliToolId === 'codex') {
+            const codexCliPath = await getExternalCliPath('codex');
+            if (codexCliPath) {
+                return {
+                    CLAUDE_CLI_PATH: codexCliPath,
+                    ANTHROPIC_MODEL: model,
+                    [CLI_PROVIDER_KIND_KEY]: CLI_PROVIDER_KIND,
+                    [CLI_PROVIDER_TOOL_KEY]: 'codex'
+                };
+            }
+
             return getFirstMatchingAPIProfileEnv(model, CLI_CODEX_PROVIDER_HINTS);
         }
 

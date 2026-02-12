@@ -455,6 +455,34 @@ def _is_external_cli_provider() -> bool:
     return provider_kind == "cli" and bool(cli_path) and cli_tool not in {"", "claude-code"}
 
 
+def _resolve_external_cli_model(cli_tool: str, requested_model: str | None) -> str | None:
+    """
+    Resolve model argument for external CLI providers.
+
+    Generic placeholder values (e.g. "codex") should not be forced as `--model`
+    because many CLIs expect provider-specific model IDs and already have a
+    configured default in their own config file.
+    """
+    if not requested_model:
+        return None
+
+    normalized_tool = (cli_tool or "").strip().lower()
+    normalized_model = requested_model.strip().lower()
+    if not normalized_model:
+        return None
+
+    placeholder_models: dict[str, set[str]] = {
+        "codex": {"codex", "default", "auto"},
+        "open-code": {"open-code", "opencode", "default", "auto"},
+        "kimi-code": {"kimi", "kimi-code", "default", "auto"},
+    }
+
+    if normalized_model in placeholder_models.get(normalized_tool, set()):
+        return None
+
+    return requested_model
+
+
 def create_client(
     project_dir: Path,
     spec_dir: Path,
@@ -850,8 +878,19 @@ def create_client(
     print()
 
     # Build options dict, conditionally including output_format
+    external_cli_tool = os.environ.get("AUTOCLAUDE_CLI_TOOL", "").strip().lower()
+    external_cli_active = _is_external_cli_provider()
+    effective_model: str | None = model
+    if external_cli_active:
+        effective_model = _resolve_external_cli_model(external_cli_tool, model)
+        if effective_model is None:
+            logger.info(
+                "External CLI '%s': using provider default model (requested='%s')",
+                external_cli_tool or "unknown",
+                model,
+            )
+
     options_kwargs: dict[str, Any] = {
-        "model": model,
         "system_prompt": base_prompt,
         "allowed_tools": allowed_tools_list,
         "mcp_servers": mcp_servers,
@@ -872,6 +911,9 @@ def create_client(
         # This prevents "File has not been read yet" errors in recovery sessions
         "enable_file_checkpointing": True,
     }
+
+    if effective_model:
+        options_kwargs["model"] = effective_model
 
     # Fast mode: enable user setting source so CLI reads fastMode from
     # ~/.claude/settings.json. Without this, the SDK's default --setting-sources ""
