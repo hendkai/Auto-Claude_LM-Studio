@@ -81,18 +81,25 @@ jobs:
           SENTRY_TRACES_SAMPLE_RATE: ${{ secrets.SENTRY_TRACES_SAMPLE_RATE }}
           SENTRY_PROFILES_SAMPLE_RATE: ${{ secrets.SENTRY_PROFILES_SAMPLE_RATE }}
 
+      - name: Check notarization prerequisites (Intel)
+        id: notarization_ready_intel
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.MAC_CERTIFICATE }}" ] && [ -n "${{ secrets.APPLE_ID }}" ] && [ -n "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" ] && [ -n "${{ secrets.APPLE_TEAM_ID }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::macOS notarization skipped (Intel) - certificate or Apple notarization secrets not configured."
+          fi
+
       - name: Submit notarization (async)
         id: notarize
-        if: ${{ secrets.MAC_CERTIFICATE != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        if: ${{ steps.notarization_ready_intel.outputs.enabled == 'true' }}
         uses: ./.github/actions/submit-macos-notarization
         with:
           apple-id: ${{ secrets.APPLE_ID }}
           apple-app-specific-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
-
-      - name: Skip notarization notice (Intel)
-        if: ${{ secrets.MAC_CERTIFICATE == '' || secrets.APPLE_ID == '' || secrets.APPLE_APP_SPECIFIC_PASSWORD == '' || secrets.APPLE_TEAM_ID == '' }}
-        run: echo "::warning::macOS notarization skipped (Intel) - certificate or Apple notarization secrets not configured."
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -162,18 +169,25 @@ jobs:
           SENTRY_TRACES_SAMPLE_RATE: ${{ secrets.SENTRY_TRACES_SAMPLE_RATE }}
           SENTRY_PROFILES_SAMPLE_RATE: ${{ secrets.SENTRY_PROFILES_SAMPLE_RATE }}
 
+      - name: Check notarization prerequisites (ARM64)
+        id: notarization_ready_arm64
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.MAC_CERTIFICATE }}" ] && [ -n "${{ secrets.APPLE_ID }}" ] && [ -n "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" ] && [ -n "${{ secrets.APPLE_TEAM_ID }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::macOS notarization skipped (ARM64) - certificate or Apple notarization secrets not configured."
+          fi
+
       - name: Submit notarization (async)
         id: notarize
-        if: ${{ secrets.MAC_CERTIFICATE != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        if: ${{ steps.notarization_ready_arm64.outputs.enabled == 'true' }}
         uses: ./.github/actions/submit-macos-notarization
         with:
           apple-id: ${{ secrets.APPLE_ID }}
           apple-app-specific-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
-
-      - name: Skip notarization notice (ARM64)
-        if: ${{ secrets.MAC_CERTIFICATE == '' || secrets.APPLE_ID == '' || secrets.APPLE_APP_SPECIFIC_PASSWORD == '' || secrets.APPLE_TEAM_ID == '' }}
-        run: echo "::warning::macOS notarization skipped (ARM64) - certificate or Apple notarization secrets not configured."
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -433,24 +447,37 @@ jobs:
   # Finalize macOS notarization (runs in parallel with Windows/Linux builds)
   finalize-notarization:
     needs: [build-macos-intel, build-macos-arm64]
-    if: ${{ secrets.MAC_CERTIFICATE != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' && needs.build-macos-intel.result == 'success' && needs.build-macos-arm64.result == 'success' }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check stapling prerequisites
+        id: stapling_ready
+        shell: bash
+        run: |
+          if [ -n "${{ needs.build-macos-intel.outputs.notarization_id }}" ] && [ -n "${{ needs.build-macos-arm64.outputs.notarization_id }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping finalize-notarization: notarization IDs are missing (likely unsigned build)."
+          fi
+
       - name: Download Intel DMG
+        if: ${{ steps.stapling_ready.outputs.enabled == 'true' }}
         uses: actions/download-artifact@v7
         with:
           name: macos-intel-builds
           path: intel
 
       - name: Download ARM64 DMG
+        if: ${{ steps.stapling_ready.outputs.enabled == 'true' }}
         uses: actions/download-artifact@v7
         with:
           name: macos-arm64-builds
           path: arm64
 
       - name: Wait for notarization and staple
+        if: ${{ steps.stapling_ready.outputs.enabled == 'true' }}
         uses: ./.github/actions/finalize-macos-notarization
         with:
           apple-id: ${{ secrets.APPLE_ID }}
@@ -462,12 +489,14 @@ jobs:
           arm64-dmg-file: ${{ needs.build-macos-arm64.outputs.dmg_file }}
 
       - name: Upload stapled Intel DMG
+        if: ${{ steps.stapling_ready.outputs.enabled == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: macos-intel-stapled
           path: intel/*.dmg
 
       - name: Upload stapled ARM64 DMG
+        if: ${{ steps.stapling_ready.outputs.enabled == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: macos-arm64-stapled
