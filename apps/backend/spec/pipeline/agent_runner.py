@@ -53,6 +53,7 @@ class AgentRunner:
         prompt_file: str,
         additional_context: str = "",
         interactive: bool = False,
+        model: str | None = None,
         thinking_budget: int | None = None,
         thinking_level: str = "medium",
         prior_phase_summaries: str | None = None,
@@ -63,6 +64,7 @@ class AgentRunner:
             prompt_file: The prompt file to use (relative to prompts directory)
             additional_context: Additional context to add to the prompt
             interactive: Whether to run in interactive mode
+            model: Optional model override for this call
             thinking_budget: Token budget for extended thinking (None = disabled)
             thinking_level: Thinking level string (low, medium, high)
             prior_phase_summaries: Summaries from previous phases for context
@@ -76,7 +78,7 @@ class AgentRunner:
             "Running spec creation agent",
             prompt_file=prompt_file,
             spec_dir=str(self.spec_dir),
-            model=self.model,
+            model=model or self.model,
             interactive=interactive,
         )
 
@@ -130,13 +132,14 @@ class AgentRunner:
             resolve_model_id,
         )
 
-        betas = get_model_betas(self.model)
+        active_model = model or self.model
+        betas = get_model_betas(active_model)
         fast_mode = get_fast_mode(self.spec_dir)
         debug(
             "agent_runner",
             f"[Fast Mode] {'ENABLED' if fast_mode else 'disabled'} for spec pipeline agent",
         )
-        resolved_model = resolve_model_id(self.model)
+        resolved_model = resolve_model_id(active_model)
         thinking_kwargs = get_thinking_kwargs_for_model(
             resolved_model, thinking_level or "medium"
         )

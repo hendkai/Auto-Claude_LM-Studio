@@ -6,13 +6,20 @@ Main orchestration logic for spec creation with dynamic complexity adaptation.
 """
 
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 
 from analysis.analyzers import analyze_project
 from core.task_event import TaskEventEmitter
 from core.workspace.models import SpecNumberLock
-from phase_config import get_thinking_budget
+from phase_config import (
+    PHASE_PROVIDER_ENV_CONFIG_KEY,
+    get_phase_model,
+    get_phase_thinking,
+    get_thinking_budget,
+    resolve_model_id,
+)
 from prompts_pkg.project_context import should_refresh_project_index
 from review import run_review_checkpoint
 from task_logger import (
@@ -127,6 +134,15 @@ class SpecOrchestrator:
             )
         return self._agent_runner
 
+    @staticmethod
+    def _map_pipeline_phase_to_model_phase(phase_name: str | None) -> str:
+        """Map detailed spec pipeline phases to the 4-phase model config schema."""
+        if phase_name == "planning":
+            return "planning"
+        if phase_name in {"validation", "self_critique"}:
+            return "qa"
+        return "spec"
+
     async def _run_agent(
         self,
         prompt_file: str,
@@ -147,8 +163,17 @@ class SpecOrchestrator:
         """
         runner = self._get_agent_runner()
 
-        # Use user's configured thinking level for all spec phases
-        thinking_budget = get_thinking_budget(self.thinking_level)
+        effective_model = resolve_model_id(self.model)
+        effective_thinking = self.thinking_level
+
+        # When per-phase provider config is present, resolve model/thinking per phase.
+        # This enables step-level provider/model selection with fallback chains.
+        if os.environ.get(PHASE_PROVIDER_ENV_CONFIG_KEY, "").strip():
+            phase_key = self._map_pipeline_phase_to_model_phase(phase_name)
+            effective_model = get_phase_model(self.spec_dir, phase_key, None)
+            effective_thinking = get_phase_thinking(self.spec_dir, phase_key, None)
+
+        thinking_budget = get_thinking_budget(effective_thinking)
 
         # Format prior phase summaries for context
         prior_summaries = format_phase_summaries(self._phase_summaries)
@@ -157,8 +182,9 @@ class SpecOrchestrator:
             prompt_file,
             additional_context,
             interactive,
+            model=effective_model,
             thinking_budget=thinking_budget,
-            thinking_level=self.thinking_level,
+            thinking_level=effective_thinking,
             prior_phase_summaries=prior_summaries if prior_summaries else None,
         )
 

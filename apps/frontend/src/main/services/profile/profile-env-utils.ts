@@ -14,7 +14,7 @@ const PHASE_PROVIDER_AUTH_KEYS = [
     'ANTHROPIC_API_KEY',
     'OPENAI_API_KEY'
 ] as const;
-const CLI_KIMI_PROVIDER_HINTS = ['moonshot.ai', 'z.ai', 'bigmodel.cn'];
+const CLI_KIMI_PROVIDER_HINTS = ['moonshot.ai', 'moonshot.cn'];
 const CLI_CODEX_PROVIDER_HINTS = ['api.openai.com', 'openrouter.ai', 'opencode.ai'];
 const CLI_OPENCODE_PROVIDER_HINTS = ['opencode.ai'];
 
@@ -192,6 +192,39 @@ function buildAPIProfileEnv(profile: APIProfile, model: string): Record<string, 
     return filteredEnvVars;
 }
 
+function isModelLikelyCompatibleWithBaseUrl(model: string, baseUrl: string): boolean {
+    const normalizedModel = model.trim().toLowerCase();
+    const normalizedBaseUrl = (baseUrl || '').toLowerCase();
+
+    if (!normalizedModel || !normalizedBaseUrl) {
+        return false;
+    }
+
+    const isMoonshotProvider =
+        normalizedBaseUrl.includes('moonshot.ai') ||
+        normalizedBaseUrl.includes('moonshot.cn');
+    const isGlmProvider =
+        normalizedBaseUrl.includes('z.ai') ||
+        normalizedBaseUrl.includes('bigmodel.cn');
+
+    // Kimi model IDs are Moonshot-specific and must not be routed to GLM endpoints.
+    if (normalizedModel.startsWith('kimi')) {
+        return isMoonshotProvider;
+    }
+
+    // GLM model IDs should only be routed to z.ai / BigModel endpoints.
+    if (normalizedModel.startsWith('glm')) {
+        return isGlmProvider;
+    }
+
+    // Claude model IDs are typically incompatible with GLM endpoints.
+    if (normalizedModel.startsWith('claude-')) {
+        return !isGlmProvider;
+    }
+
+    return true;
+}
+
 async function getFirstMatchingAPIProfileEnv(
     model: string,
     baseUrlHints: string[]
@@ -201,7 +234,11 @@ async function getFirstMatchingAPIProfileEnv(
     const matchingProfile = file.profiles.find((profile: APIProfile) => {
         const baseUrl = (profile.baseUrl || '').toLowerCase();
         const hasAuth = Boolean(profile.apiKey?.trim());
-        return hasAuth && baseUrlHints.some((hint) => baseUrl.includes(hint));
+        return (
+            hasAuth &&
+            baseUrlHints.some((hint) => baseUrl.includes(hint)) &&
+            isModelLikelyCompatibleWithBaseUrl(model, baseUrl)
+        );
     });
 
     if (!matchingProfile) {
