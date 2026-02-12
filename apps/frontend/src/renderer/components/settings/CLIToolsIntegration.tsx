@@ -1,25 +1,24 @@
 /**
  * CLI Tools Integration
  * =====================
- * 
+ *
  * Verwaltung der lokalen CLI Tools (Claude Code, Kimi Code, Codex).
  * Separat von API Integrations - diese Tools laufen lokal auf dem System.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { 
-  Terminal, 
-  Code, 
-  Sparkles, 
-  Download, 
-  Check, 
+import {
+  Terminal,
+  Code,
+  Sparkles,
+  Download,
+  Check,
   AlertTriangle,
   X,
   Loader2,
   RefreshCw,
   ExternalLink,
-  Play,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
@@ -33,7 +32,6 @@ interface CLITool {
   name: string;
   description: string;
   icon: React.ElementType;
-  installUrl: string;
   docsUrl: string;
   checkInstalled: () => Promise<CLIToolStatus | null>;
   install: () => Promise<void>;
@@ -47,39 +45,47 @@ interface CLIToolStatus {
   path: string | null;
 }
 
-// Mock status check - in production this would call IPC
-async function checkClaudeCodeStatus(): Promise<CLIToolStatus | null> {
-  // TODO: Call window.electronAPI.checkClaudeCodeVersion()
-  await new Promise(r => setTimeout(r, 500));
-  return {
-    installed: true,
-    version: '2.1.0',
-    latestVersion: '2.1.0',
-    isOutdated: false,
-    path: '/usr/local/bin/claude',
+interface CLIStatusPayload {
+  installed: string | null;
+  latest: string | null;
+  isOutdated: boolean;
+  path?: string;
+  detectionResult?: {
+    path?: string;
   };
+}
+
+function normalizeStatus(payload: CLIStatusPayload): CLIToolStatus {
+  const installed = payload.installed ?? null;
+  const latest = payload.latest && payload.latest !== 'unknown' ? payload.latest : null;
+  return {
+    installed: Boolean(installed),
+    version: installed,
+    latestVersion: latest,
+    isOutdated: Boolean(installed && latest && payload.isOutdated),
+    path: payload.path ?? payload.detectionResult?.path ?? null,
+  };
+}
+
+async function checkClaudeCodeStatus(): Promise<CLIToolStatus | null> {
+  if (!window.electronAPI?.checkClaudeCodeVersion) return null;
+  const result = await window.electronAPI.checkClaudeCodeVersion();
+  if (!result.success || !result.data) return null;
+  return normalizeStatus(result.data);
 }
 
 async function checkKimiCodeStatus(): Promise<CLIToolStatus | null> {
-  await new Promise(r => setTimeout(r, 500));
-  return {
-    installed: false,
-    version: null,
-    latestVersion: '1.0.0',
-    isOutdated: false,
-    path: null,
-  };
+  if (!window.electronAPI?.checkKimiCodeVersion) return null;
+  const result = await window.electronAPI.checkKimiCodeVersion();
+  if (!result.success || !result.data) return null;
+  return normalizeStatus(result.data);
 }
 
 async function checkCodexStatus(): Promise<CLIToolStatus | null> {
-  await new Promise(r => setTimeout(r, 500));
-  return {
-    installed: true,
-    version: '1.0.2',
-    latestVersion: '1.0.3',
-    isOutdated: true,
-    path: '/usr/local/bin/codex',
-  };
+  if (!window.electronAPI?.checkCodexVersion) return null;
+  const result = await window.electronAPI.checkCodexVersion();
+  if (!result.success || !result.data) return null;
+  return normalizeStatus(result.data);
 }
 
 const CLI_TOOLS: CLITool[] = [
@@ -88,12 +94,12 @@ const CLI_TOOLS: CLITool[] = [
     name: 'Claude Code',
     description: 'Anthropic\'s official CLI agent for coding tasks',
     icon: Terminal,
-    installUrl: 'https://claude.ai/code',
     docsUrl: 'https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview',
     checkInstalled: checkClaudeCodeStatus,
     install: async () => {
-      // TODO: window.electronAPI.installClaudeCode()
-      console.log('Installing Claude Code...');
+      if (!window.electronAPI?.installClaudeCode) throw new Error('Claude Code installer unavailable');
+      const result = await window.electronAPI.installClaudeCode();
+      if (!result.success) throw new Error(result.error || 'Install failed');
     },
   },
   {
@@ -101,12 +107,12 @@ const CLI_TOOLS: CLITool[] = [
     name: 'Kimi Code',
     description: 'Moonshot AI\'s CLI agent (Kimi)',
     icon: Sparkles,
-    installUrl: 'https://www.moonshot.cn/kimi-code',
     docsUrl: 'https://github.com/MoonshotAI/kimi-cli',
     checkInstalled: checkKimiCodeStatus,
     install: async () => {
-      // TODO: window.electronAPI.installKimiCode()
-      console.log('Installing Kimi Code...');
+      if (!window.electronAPI?.installKimiCode) throw new Error('Kimi Code installer unavailable');
+      const result = await window.electronAPI.installKimiCode();
+      if (!result.success) throw new Error(result.error || 'Install failed');
     },
   },
   {
@@ -114,12 +120,12 @@ const CLI_TOOLS: CLITool[] = [
     name: 'Codex',
     description: 'OpenAI\'s official CLI coding agent',
     icon: Code,
-    installUrl: 'https://github.com/openai/codex',
     docsUrl: 'https://github.com/openai/codex/blob/main/README.md',
     checkInstalled: checkCodexStatus,
     install: async () => {
-      // TODO: window.electronAPI.installCodex()
-      console.log('Installing Codex...');
+      if (!window.electronAPI?.installCodex) throw new Error('Codex installer unavailable');
+      const result = await window.electronAPI.installCodex();
+      if (!result.success) throw new Error(result.error || 'Install failed');
     },
   },
 ];
@@ -168,16 +174,25 @@ export function CLIToolsIntegration() {
       await tool.install();
       // Re-check after install
       await checkTool(tool);
+    } catch (error) {
+      console.error(`Failed to install ${tool.name}:`, error);
     } finally {
       setInstalling(prev => ({ ...prev, [tool.id]: false }));
     }
   };
-  
-  const openTool = (toolId: string) => {
-    // TODO: Open terminal with tool
-    console.log(`Opening ${toolId}...`);
+
+  const openDocs = async (tool: CLITool) => {
+    try {
+      if (window.electronAPI?.openExternal) {
+        await window.electronAPI.openExternal(tool.docsUrl);
+        return;
+      }
+      window.open(tool.docsUrl, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error(`Failed to open docs for ${tool.name}:`, error);
+    }
   };
-  
+
   return (
     <div className="space-y-6">
       <div>
@@ -270,15 +285,6 @@ export function CLIToolsIntegration() {
                     </Button>
                   ) : (
                     <>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openTool(tool.id)}
-                      >
-                        <Play className="mr-2 h-4 w-4" />
-                        Open in Terminal
-                      </Button>
-                      
                       {status.isOutdated && (
                         <Button
                           size="sm"
@@ -312,7 +318,7 @@ export function CLIToolsIntegration() {
                     size="sm"
                     variant="link"
                     className="text-muted-foreground"
-                    onClick={() => window.open(tool.docsUrl, '_blank')}
+                    onClick={() => openDocs(tool)}
                   >
                     Documentation
                     <ExternalLink className="ml-1 h-3 w-3" />
@@ -339,6 +345,9 @@ export function CLIToolsIntegration() {
               <p className="mt-2">
                 <strong>API Integrations</strong> are used by the Auto Claude agent for automated 
                 tasks and are configured with API keys in the settings.
+              </p>
+              <p className="mt-2">
+                <strong>OpenCode</strong> is available as a preset in API profiles (Custom Endpoints).
               </p>
             </div>
           </div>

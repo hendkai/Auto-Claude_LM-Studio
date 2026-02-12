@@ -6,7 +6,6 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import { Loader2, ChevronDown, Search, Check, RefreshCw, Folder } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { cn } from '../../lib/utils';
@@ -33,6 +32,58 @@ interface ProfileModels {
     models: ModelInfo[];
 }
 
+interface CLIVersionCheckPayload {
+    installed?: string | null;
+}
+
+interface CLIVersionCheckResult {
+    success?: boolean;
+    data?: CLIVersionCheckPayload;
+}
+
+const OAUTH_CLAUDE_MODELS: ModelInfo[] = [
+    { id: 'claude-sonnet-4-5-20250929', display_name: 'Claude Sonnet 4.5' },
+    { id: 'claude-code', display_name: 'Claude Code' },
+    { id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 4.5' },
+    { id: 'claude-opus-4-5-20251101', display_name: 'Claude Opus 4.5' }
+];
+
+const CLI_MODEL_GROUPS: Array<{
+    id: 'claude-code' | 'kimi-code' | 'codex' | 'open-code';
+    name: string;
+    models: ModelInfo[];
+    checker?: () => Promise<CLIVersionCheckResult>;
+}> = [
+    {
+        id: 'claude-code',
+        name: 'Claude Code CLI',
+        models: OAUTH_CLAUDE_MODELS,
+        checker: async () => window.electronAPI?.checkClaudeCodeVersion?.() || { success: false }
+    },
+    {
+        id: 'kimi-code',
+        name: 'Kimi Code CLI',
+        models: [
+            { id: 'glm-5.0', display_name: 'GLM-5.0' },
+            { id: 'glm-4.6', display_name: 'GLM-4.6' },
+            { id: 'glm-4.5', display_name: 'GLM-4.5' },
+            { id: 'glm-4.5-air', display_name: 'GLM-4.5-Air' }
+        ],
+        checker: async () => window.electronAPI?.checkKimiCodeVersion?.() || { success: false }
+    },
+    {
+        id: 'codex',
+        name: 'Codex CLI',
+        models: [{ id: 'codex', display_name: 'Codex' }],
+        checker: async () => window.electronAPI?.checkCodexVersion?.() || { success: false }
+    },
+    {
+        id: 'open-code',
+        name: 'OpenCode',
+        models: [{ id: 'open-code', display_name: 'OpenCode' }]
+    }
+];
+
 /**
  * MultiProfileModelSelect Component
  *
@@ -52,7 +103,6 @@ export function MultiProfileModelSelect({
     disabled = false,
     className
 }: MultiProfileModelSelectProps) {
-    const { t } = useTranslation();
     const { profiles, discoverModels, settings } = useSettingsStore();
 
     // Dropdown state
@@ -67,113 +117,143 @@ export function MultiProfileModelSelect({
 
     /**
      * Fetch models from all profiles (both API profiles and OAuth accounts)
-     */
-    /**
-     * Fetch models from all profiles (both API profiles and OAuth accounts)
      * AND auto-detect local LM Studio instance
      */
     const fetchAllProfileModels = async () => {
         setIsLoading(true);
-        const results: ProfileModels[] = [];
-
-        // Helper to safely fetch models for a profile
-        const fetchProfileModels = async (profile: any) => {
-            try {
-                const models = await discoverModels(
-                    profile.baseUrl,
-                    profile.apiKey,
-                    undefined
-                );
-
-                if (models && Array.isArray(models) && models.length > 0) {
-                    return {
-                        profileId: `api:${profile.id}`,
-                        profileName: `${profile.name} (API)`,
-                        models
-                    };
+        try {
+            const isCliInstalled = async (checker?: () => Promise<CLIVersionCheckResult>): Promise<boolean> => {
+                if (!checker) {
+                    return true;
                 }
-            } catch (err) {
-                console.warn(`[MultiProfileModelSelect] Failed to fetch models from API profile ${profile.name}:`, err);
-            }
-            return null;
-        };
 
-        // Helper for local LM Studio detection
-        const fetchLocalLMStudioModels = async () => {
-            try {
-                // Use configured URL or default
-                const url = settings.localLmStudioUrl || 'http://localhost:1234/v1';
-                const key = settings.localLmStudioApiKey || 'lm-studio';
-
-                const models = await discoverModels(url, key, undefined);
-
-                if (models && Array.isArray(models) && models.length > 0) {
-                    console.log('[MultiProfileModelSelect] Auto-detected local LM Studio models');
-                    return {
-                        profileId: 'local:lm-studio',
-                        profileName: 'Local (LM Studio)',
-                        models
-                    };
+                try {
+                    const result = await checker();
+                    if (!result?.success) {
+                        return false;
+                    }
+                    return Boolean(result.data?.installed);
+                } catch {
+                    return false;
                 }
-            } catch (err) {
-                // Ignore errors (not running)
-            }
-            return null;
-        };
+            };
 
-        // 1. Fetch from API Profiles (Parallel)
-        const apiPromises = profiles.map(p => fetchProfileModels(p));
-
-        // 2. Auto-detect LM Studio (Parallel)
-        // Always try to fetch local models using settings provided
-        const localPromise = fetchLocalLMStudioModels();
-
-        // 3. Fetch from OAuth Claude Accounts (Parallel-ish logic)
-        const oauthPromise = (async () => {
-            try {
-                const claudeProfilesResult = await window.electronAPI.getClaudeProfiles();
-                if (claudeProfilesResult.success && claudeProfilesResult.data) {
-                    const authenticatedOAuthProfiles = claudeProfilesResult.data.profiles.filter(
-                        (p: any) => p.oauthToken || (p.isDefault && p.configDir)
+            // Helper to safely fetch models for a profile
+            const fetchProfileModels = async (profile: any) => {
+                try {
+                    const models = await discoverModels(
+                        profile.baseUrl,
+                        profile.apiKey,
+                        undefined
                     );
 
-                    const oauthResults: ProfileModels[] = [];
-                    for (const oauthProfile of authenticatedOAuthProfiles) {
-                        const claudeModels: ModelInfo[] = [
-                            { id: 'claude-sonnet-4-5-20250929', display_name: 'Claude Sonnet 4.5' },
-                            { id: 'claude-code', display_name: 'Claude Code' },
-                            { id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 4.5' },
-                            { id: 'claude-opus-4-5-20251101', display_name: 'Claude Opus 4.5' }
-                        ];
-
-                        oauthResults.push({
-                            profileId: `oauth:${oauthProfile.id}`,
-                            profileName: `${oauthProfile.name} (OAuth)${oauthProfile.email ? ` - ${oauthProfile.email}` : ''}`,
-                            models: claudeModels
-                        });
+                    if (models && Array.isArray(models) && models.length > 0) {
+                        return {
+                            profileId: `api:${profile.id}`,
+                            profileName: `${profile.name} (API)`,
+                            models
+                        };
                     }
-                    return oauthResults;
+                } catch (err) {
+                    console.warn(`[MultiProfileModelSelect] Failed to fetch models from API profile ${profile.name}:`, err);
                 }
-            } catch (err) {
-                console.warn('[MultiProfileModelSelect] Failed to fetch OAuth Claude accounts:', err);
-            }
-            return [];
-        })();
+                return null;
+            };
 
-        // Wait for all
-        const [apiResults, localResult, oauthResults] = await Promise.all([
-            Promise.all(apiPromises),
-            localPromise,
-            oauthPromise
-        ]);
+            // Helper for local LM Studio detection
+            const fetchLocalLMStudioModels = async () => {
+                try {
+                    // Use configured URL or default
+                    const url = settings.localLmStudioUrl || 'http://localhost:1234/v1';
+                    const key = settings.localLmStudioApiKey || 'lm-studio';
 
-        // Combine results
-        const validApiResults = apiResults.filter((r): r is ProfileModels => r !== null);
-        const validLocalResult = localResult ? [localResult] : [];
-        const validOauthResults = oauthResults || [];
+                    const models = await discoverModels(url, key, undefined);
 
-        setProfileModels([...validOauthResults, ...validApiResults, ...validLocalResult]);
-        setIsLoading(false);
+                    if (models && Array.isArray(models) && models.length > 0) {
+                        console.log('[MultiProfileModelSelect] Auto-detected local LM Studio models');
+                        return {
+                            profileId: 'local:lm-studio',
+                            profileName: 'Local (LM Studio)',
+                            models
+                        };
+                    }
+                } catch (err) {
+                    // Ignore errors (not running)
+                }
+                return null;
+            };
+
+            // 1. Fetch from API Profiles (Parallel)
+            const apiPromises = profiles.map(p => fetchProfileModels(p));
+
+            // 2. Auto-detect LM Studio (Parallel)
+            // Always try to fetch local models using settings provided
+            const localPromise = fetchLocalLMStudioModels();
+
+            // 3. Fetch from OAuth Claude Accounts (Parallel-ish logic)
+            const oauthPromise = (async () => {
+                try {
+                    const claudeProfilesResult = await window.electronAPI.getClaudeProfiles();
+                    if (claudeProfilesResult.success && claudeProfilesResult.data) {
+                        const authenticatedOAuthProfiles = claudeProfilesResult.data.profiles.filter(
+                            (p: any) => p.oauthToken || (p.isDefault && p.configDir)
+                        );
+
+                        const oauthResults: ProfileModels[] = [];
+                        for (const oauthProfile of authenticatedOAuthProfiles) {
+                            oauthResults.push({
+                                profileId: `oauth:${oauthProfile.id}`,
+                                profileName: `${oauthProfile.name} (OAuth)${oauthProfile.email ? ` - ${oauthProfile.email}` : ''}`,
+                                models: OAUTH_CLAUDE_MODELS
+                            });
+                        }
+                        return oauthResults;
+                    }
+                } catch (err) {
+                    console.warn('[MultiProfileModelSelect] Failed to fetch OAuth Claude accounts:', err);
+                }
+                return [];
+            })();
+
+            // 4. CLI tools + static model catalog (Parallel)
+            const cliPromise = (async () => {
+                const cliResults = await Promise.all(
+                    CLI_MODEL_GROUPS.map(async (group) => {
+                        const installed = await isCliInstalled(group.checker);
+                        return {
+                            profileId: `cli:${group.id}`,
+                            profileName: `${group.name}${installed ? '' : ' (Not installed)'}`,
+                            models: group.models
+                        } satisfies ProfileModels;
+                    })
+                );
+
+                return cliResults;
+            })();
+
+            // Wait for all
+            const [apiResults, localResult, oauthResults, cliResults] = await Promise.all([
+                Promise.all(apiPromises),
+                localPromise,
+                oauthPromise,
+                cliPromise
+            ]);
+
+            // Combine results
+            const validApiResults = apiResults.filter((r): r is ProfileModels => r !== null);
+            const validLocalResult = localResult ? [localResult] : [];
+            const validOauthResults = oauthResults || [];
+            const validCliResults = cliResults || [];
+
+            setProfileModels([
+                ...validOauthResults,
+                ...validApiResults,
+                ...validLocalResult,
+                ...validCliResults
+            ]);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     /**

@@ -64,7 +64,8 @@ import type {
   ClaudeProfile,
   ClaudeAutoSwitchSettings,
   ClaudeAuthResult,
-  ClaudeUsageSnapshot
+  ClaudeUsageSnapshot,
+  AllProfilesUsage
 } from './agent';
 import type { AppSettings, SourceEnvConfig, SourceEnvCheckResult } from './settings';
 import type { AppUpdateInfo, AppUpdateProgress, AppUpdateAvailableEvent, AppUpdateDownloadedEvent } from './app-update';
@@ -284,8 +285,12 @@ export interface ElectronAPI {
   // Usage Monitoring (Proactive Account Switching)
   /** Request current usage snapshot */
   requestUsageUpdate: () => Promise<IPCResult<ClaudeUsageSnapshot | null>>;
+  /** Request usage snapshots for all configured OAuth/API profiles */
+  requestAllProfilesUsage: (forceRefresh?: boolean) => Promise<IPCResult<AllProfilesUsage | null>>;
   /** Listen for usage data updates */
   onUsageUpdated: (callback: (usage: ClaudeUsageSnapshot) => void) => () => void;
+  /** Listen for all-profile usage updates */
+  onAllProfilesUsageUpdated: (callback: (allProfilesUsage: AllProfilesUsage) => void) => () => void;
   /** Listen for proactive swap notifications */
   onProactiveSwapNotification: (callback: (notification: {
     fromProfile: { id: string; name: string };

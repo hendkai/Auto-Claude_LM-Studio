@@ -537,7 +537,8 @@
     "description": "Gérer les comptes Claude et les endpoints API",
     "tabs": {
       "claudeCode": "Claude Code",
-      "customEndpoints": "Endpoints personnalisés"
+      "customEndpoints": "Endpoints personnalisés",
+      "cliTools": "Outils CLI"
     },
     "claudeCode": {
       "description": "Ajoutez plusieurs abonnements Claude pour basculer automatiquement entre eux lorsque vous atteignez les limites de taux.",
@@ -559,6 +560,7 @@
     "customEndpoints": {
       "description": "Configurez des endpoints API compatibles Anthropic personnalisés",
       "addButton": "Ajouter un profil",
+      "presetHint": "Astuce : ajoutez des profils depuis les presets (OpenCode, GLM, Kimi, Codex) pour les inclure dans l'ordre de priorité.",
       "activeBadge": "Actif",
       "customModels": "Modèles personnalisés: {{models}}",
       "setActive": {
@@ -587,6 +589,10 @@
         "deleting": "Suppression..."
       }
     },
+    "cliTools": {
+      "description": "Gérez les agents CLI locaux (Claude Code, Kimi Code, Codex).",
+      "openCodeHint": "OpenCode se configure comme fournisseur API via les Endpoints personnalisés."
+    },
     "autoSwitching": {
       "title": "Basculement automatique de compte",
       "description": "Basculez automatiquement entre les comptes pour éviter les interruptions. Configurez la surveillance proactive pour basculer avant d'atteindre les limites.",
@@ -606,6 +612,7 @@
     "priority": {
       "title": "Ordre de priorité des comptes",
       "description": "Glissez pour réorganiser. Le système basculera vers le prochain compte disponible dans l'ordre.",
+      "addProvider": "Ajouter un fournisseur API",
       "noAccounts": "Aucun compte configuré. Ajoutez des comptes ci-dessus pour définir la priorité.",
       "noEmail": "Pas d'email",
       "active": "Actif",
@@ -641,6 +648,7 @@
       "deleteProfileFailed": "Échec de la suppression du profil",
       "renameProfileFailed": "Échec du renommage du profil",
       "setActiveProfileFailed": "Échec de la définition du profil actif",
+      "authFailed": "Échec de l'authentification",
       "tokenSaved": "Token enregistré",
       "tokenSavedDescription": "Votre token a été enregistré avec succès.",
       "tokenSaveFailed": "Échec de l'enregistrement du token",

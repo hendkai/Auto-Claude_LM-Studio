@@ -55,6 +55,41 @@ export interface ClaudeUsageSnapshot {
 }
 
 /**
+ * Usage summary for a single configured account/profile.
+ * Used by account-priority UI to render per-profile usage health.
+ */
+export interface ProfileUsageSummary {
+  /** Profile ID (OAuth profile id or API profile id) */
+  profileId: string;
+  /** Display name for UI */
+  profileName: string;
+  /** Source profile type */
+  profileType: 'oauth' | 'api';
+  /** Session usage percentage (0-100), when available */
+  sessionPercent?: number;
+  /** Weekly usage percentage (0-100), when available */
+  weeklyPercent?: number;
+  /** Whether profile is currently rate-limited */
+  isRateLimited?: boolean;
+  /** Which limit type is currently constraining */
+  rateLimitType?: 'session' | 'weekly';
+  /** Indicates invalid auth/refresh state requiring re-authentication */
+  needsReauthentication?: boolean;
+  /** Optional provider-specific usage breakdown */
+  customUsageDetails?: ClaudeUsageSnapshot['customUsageDetails'];
+  /** Timestamp when this profile usage snapshot was generated */
+  fetchedAt: Date;
+}
+
+/**
+ * Aggregated usage snapshot across all configured OAuth/API profiles.
+ */
+export interface AllProfilesUsage {
+  allProfiles: ProfileUsageSummary[];
+  fetchedAt: Date;
+}
+
+/**
  * Rate limit event recorded for a profile
  */
 export interface ClaudeRateLimitEvent {

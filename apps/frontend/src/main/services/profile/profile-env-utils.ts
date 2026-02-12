@@ -14,6 +14,9 @@ const PHASE_PROVIDER_AUTH_KEYS = [
     'ANTHROPIC_API_KEY',
     'OPENAI_API_KEY'
 ] as const;
+const CLI_KIMI_PROVIDER_HINTS = ['moonshot.ai', 'z.ai', 'bigmodel.cn'];
+const CLI_CODEX_PROVIDER_HINTS = ['api.openai.com', 'openrouter.ai', 'opencode.ai'];
+const CLI_OPENCODE_PROVIDER_HINTS = ['opencode.ai'];
 
 export interface PhaseProviderEnvEntry {
     profileId: string;
@@ -58,6 +61,10 @@ export async function getProfileEnvForPair(
     } else if (profileId.startsWith('local:lm-studio')) {
         // Local LM Studio
         return getLocalLMStudioEnv(model);
+    } else if (profileId.startsWith('cli:')) {
+        // Local CLI tools (Claude Code, Kimi Code, Codex, OpenCode)
+        const cliToolId = profileId.replace('cli:', '');
+        return getCLIProfileEnv(cliToolId, model);
     } else {
         // Fallback: Assume it's an API profile ID without prefix (backward compat)
         return getAPIProfileEnvById(profileId, model);
@@ -158,6 +165,10 @@ async function getAPIProfileEnvById(
         return {};
     }
 
+    return buildAPIProfileEnv(profile, model);
+}
+
+function buildAPIProfileEnv(profile: APIProfile, model: string): Record<string, string> {
     // Build environment variables
     const envVars: Record<string, string> = {
         ANTHROPIC_BASE_URL: normalizeBaseUrlForSdk(profile.baseUrl || ''),
@@ -179,6 +190,60 @@ async function getAPIProfileEnvById(
     }
 
     return filteredEnvVars;
+}
+
+async function getFirstMatchingAPIProfileEnv(
+    model: string,
+    baseUrlHints: string[]
+): Promise<Record<string, string>> {
+    const file = await loadProfilesFile();
+
+    const matchingProfile = file.profiles.find((profile: APIProfile) => {
+        const baseUrl = (profile.baseUrl || '').toLowerCase();
+        const hasAuth = Boolean(profile.apiKey?.trim());
+        return hasAuth && baseUrlHints.some((hint) => baseUrl.includes(hint));
+    });
+
+    if (!matchingProfile) {
+        return {};
+    }
+
+    return buildAPIProfileEnv(matchingProfile, model);
+}
+
+async function getCLIProfileEnv(
+    cliToolId: string,
+    model: string
+): Promise<Record<string, string>> {
+    try {
+        if (cliToolId === 'claude-code') {
+            const profileManager = getClaudeProfileManager();
+            const activeProfileEnv = profileManager.getActiveProfileEnv();
+            if (!activeProfileEnv || Object.keys(activeProfileEnv).length === 0) {
+                return {};
+            }
+            return {
+                ...activeProfileEnv,
+                ANTHROPIC_MODEL: model,
+            };
+        }
+
+        if (cliToolId === 'kimi-code') {
+            return getFirstMatchingAPIProfileEnv(model, CLI_KIMI_PROVIDER_HINTS);
+        }
+
+        if (cliToolId === 'codex') {
+            return getFirstMatchingAPIProfileEnv(model, CLI_CODEX_PROVIDER_HINTS);
+        }
+
+        if (cliToolId === 'open-code') {
+            return getFirstMatchingAPIProfileEnv(model, CLI_OPENCODE_PROVIDER_HINTS);
+        }
+    } catch (err) {
+        console.warn(`[ProfileEnv] Failed to resolve CLI profile ${cliToolId}:`, err);
+    }
+
+    return {};
 }
 
 function isUsablePair(pair: ProfileModelPair | undefined): pair is ProfileModelPair {

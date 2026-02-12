@@ -14,6 +14,7 @@ import {
   Eye,
   EyeOff,
   Users,
+  Terminal,
   Plus,
   Trash2,
   Star,
@@ -42,6 +43,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { SettingsSection } from './SettingsSection';
 import { AuthTerminal } from './AuthTerminal';
 import { ProfileEditDialog } from './ProfileEditDialog';
+import { CLIToolsIntegration } from './CLIToolsIntegration';
 import { AccountPriorityList, type UnifiedAccount } from './AccountPriorityList';
 import { maskApiKey } from '../../lib/profile-utils';
 import { loadClaudeProfiles as loadGlobalClaudeProfiles } from '../../stores/claude-profile-store';
@@ -66,6 +68,13 @@ interface AccountSettingsProps {
   isOpen: boolean;
 }
 
+interface CliPriorityProviderStatus {
+  id: 'claude-code' | 'kimi-code' | 'codex';
+  name: string;
+  installed: boolean;
+  path: string | null;
+}
+
 /**
  * Unified account settings with tabs for Claude Code and Custom Endpoints
  */
@@ -75,7 +84,7 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
   const { toast } = useToast();
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'claude-code' | 'custom-endpoints'>('claude-code');
+  const [activeTab, setActiveTab] = useState<'claude-code' | 'custom-endpoints' | 'cli-tools'>('claude-code');
 
   // ============================================
   // Claude Code (OAuth) state
@@ -136,6 +145,7 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
   // Usage data state (for priority list visualization)
   // ============================================
   const [profileUsageData, setProfileUsageData] = useState<Map<string, ProfileUsageSummary>>(new Map());
+  const [cliPriorityProviders, setCliPriorityProviders] = useState<CliPriorityProviderStatus[]>([]);
 
   // Fetch all profiles usage data
   // Force refresh to get fresh data when Settings opens (bypasses 1-minute cache)
@@ -152,6 +162,46 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
     } catch (err) {
       console.warn('[AccountSettings] Failed to load profile usage data:', err);
     }
+  }, []);
+
+  // Fetch local CLI tools status for priority list entries
+  const loadCliPriorityProviders = useCallback(async () => {
+    const readStatus = async (
+      checker: (() => Promise<unknown>) | undefined
+    ): Promise<{ installed: boolean; path: string | null }> => {
+      if (!checker) {
+        return { installed: false, path: null };
+      }
+      try {
+        const result = await checker() as {
+          success?: boolean;
+          data?: {
+            installed?: string | null;
+            path?: string;
+            detectionResult?: { path?: string };
+          };
+        };
+        const data = result?.success ? result.data : undefined;
+        return {
+          installed: Boolean(data?.installed),
+          path: data?.path ?? data?.detectionResult?.path ?? null
+        };
+      } catch {
+        return { installed: false, path: null };
+      }
+    };
+
+    const [claude, kimi, codex] = await Promise.all([
+      readStatus(window.electronAPI?.checkClaudeCodeVersion),
+      readStatus(window.electronAPI?.checkKimiCodeVersion),
+      readStatus(window.electronAPI?.checkCodexVersion)
+    ]);
+
+    setCliPriorityProviders([
+      { id: 'claude-code', name: 'Claude Code', ...claude },
+      { id: 'kimi-code', name: 'Kimi Code', ...kimi },
+      { id: 'codex', name: 'Codex', ...codex },
+    ]);
   }, []);
 
   // Build unified accounts list from both OAuth and API profiles
@@ -183,6 +233,12 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
 
     // Add API profiles
     apiProfiles.forEach((profile) => {
+      const usageData = profileUsageData.get(profile.id);
+      const hasUsageStats =
+        usageData?.sessionPercent !== undefined ||
+        usageData?.weeklyPercent !== undefined ||
+        (usageData?.customUsageDetails?.length ?? 0) > 0;
+
       unifiedList.push({
         id: `api-${profile.id}`,
         name: profile.name,
@@ -192,9 +248,28 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
         isActive: profile.id === activeApiProfileId,
         isNext: false, // Will be computed by AccountPriorityList
         isAvailable: true, // API profiles are always considered available
-        hasUnlimitedUsage: true, // API profiles have no rate limits
-        sessionPercent: undefined,
-        weeklyPercent: undefined,
+        hasUnlimitedUsage: !hasUsageStats,
+        sessionPercent: usageData?.sessionPercent,
+        weeklyPercent: usageData?.weeklyPercent,
+        isRateLimited: usageData?.isRateLimited,
+        rateLimitType: usageData?.rateLimitType,
+        needsReauthentication: usageData?.needsReauthentication,
+      });
+    });
+
+    // Add local CLI tools as provider entries (sortable in priority order)
+    cliPriorityProviders.forEach((tool) => {
+      unifiedList.push({
+        id: `cli-${tool.id}`,
+        name: tool.id,
+        type: 'cli',
+        displayName: tool.name,
+        identifier: tool.path || t('accounts.priority.notInstalled', 'Not installed'),
+        isActive: false,
+        isNext: false,
+        isAvailable: tool.installed,
+        hasUnlimitedUsage: true,
+        isAuthenticated: tool.installed,
       });
     });
 
@@ -211,7 +286,7 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
     }
 
     return unifiedList;
-  }, [claudeProfiles, apiProfiles, activeClaudeProfileId, activeApiProfileId, priorityOrder, profileUsageData, t]);
+  }, [claudeProfiles, apiProfiles, activeClaudeProfileId, activeApiProfileId, priorityOrder, profileUsageData, cliPriorityProviders, t]);
 
   const unifiedAccounts = buildUnifiedAccounts();
 
@@ -251,12 +326,13 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
       loadClaudeProfiles();
       loadAutoSwitchSettings();
       loadPriorityOrder();
+      loadCliPriorityProviders();
       // Force refresh usage data when Settings opens to get fresh data
       // This bypasses the 1-minute cache to ensure accurate duplicate detection
       loadProfileUsageData(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, loadProfileUsageData]);
+  }, [isOpen, loadProfileUsageData, loadCliPriorityProviders]);
 
   // Subscribe to usage updates for real-time data
   useEffect(() => {
@@ -667,7 +743,7 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
     >
       <div className="space-y-6">
         {/* Tabs for Claude Code vs Custom Endpoints */}
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'claude-code' | 'custom-endpoints')}>
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'claude-code' | 'custom-endpoints' | 'cli-tools')}>
           <TabsList className="w-full justify-start">
             <TabsTrigger value="claude-code" className="flex items-center gap-2">
               <Users className="h-4 w-4" />
@@ -676,6 +752,10 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
             <TabsTrigger value="custom-endpoints" className="flex items-center gap-2">
               <Server className="h-4 w-4" />
               {t('accounts.tabs.customEndpoints')}
+            </TabsTrigger>
+            <TabsTrigger value="cli-tools" className="flex items-center gap-2">
+              <Terminal className="h-4 w-4" />
+              {t('accounts.tabs.cliTools', 'CLI Tools')}
             </TabsTrigger>
           </TabsList>
 
@@ -1087,6 +1167,9 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
                   {t('accounts.customEndpoints.addButton')}
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                {t('accounts.customEndpoints.presetHint', 'Tip: use Add and choose presets like OpenCode, GLM, Kimi, or Codex.')}
+              </p>
 
               {/* Empty state */}
               {apiProfiles.length === 0 && (
@@ -1267,158 +1350,187 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
               </AlertDialog>
             </div>
           </TabsContent>
+
+          <TabsContent value="cli-tools">
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {t('accounts.cliTools.description', 'Manage local CLI coding agents (Claude Code, Kimi Code, Codex).')}
+              </p>
+              <CLIToolsIntegration />
+              <p className="text-xs text-muted-foreground">
+                {t('accounts.cliTools.openCodeHint', 'OpenCode is configured as a Custom Endpoint preset in the "Custom Endpoints" tab.')}
+              </p>
+            </div>
+          </TabsContent>
         </Tabs>
 
         {/* Auto-Switch Settings Section - Persistent below tabs */}
-        {totalAccounts > 1 && (
-          <div className="space-y-4 pt-6 border-t border-border">
-            <div className="flex items-center gap-2">
-              <RefreshCw className="h-4 w-4 text-muted-foreground" />
-              <h4 className="text-sm font-semibold text-foreground">{t('accounts.autoSwitching.title')}</h4>
+        <div className="space-y-4 pt-6 border-t border-border">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="h-4 w-4 text-muted-foreground" />
+            <h4 className="text-sm font-semibold text-foreground">{t('accounts.autoSwitching.title')}</h4>
+          </div>
+
+          <div className="rounded-lg bg-muted/30 border border-border p-4 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {t('accounts.autoSwitching.description')}
+            </p>
+
+            {/* Master toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-sm font-medium">{t('accounts.autoSwitching.enableAutoSwitching')}</Label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t('accounts.autoSwitching.masterSwitch')}
+                </p>
+              </div>
+              <Switch
+                checked={autoSwitchSettings?.enabled ?? false}
+                onCheckedChange={(enabled) => handleUpdateAutoSwitch({ enabled })}
+                disabled={isLoadingAutoSwitch || totalAccounts < 2}
+              />
             </div>
 
-            <div className="rounded-lg bg-muted/30 border border-border p-4 space-y-4">
-              <p className="text-sm text-muted-foreground">
-                {t('accounts.autoSwitching.description')}
+            {totalAccounts < 2 && (
+              <p className="text-xs text-muted-foreground">
+                {t('accounts.priority.noAccounts')}
               </p>
+            )}
 
-              {/* Master toggle */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-sm font-medium">{t('accounts.autoSwitching.enableAutoSwitching')}</Label>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {t('accounts.autoSwitching.masterSwitch')}
-                  </p>
-                </div>
-                <Switch
-                  checked={autoSwitchSettings?.enabled ?? false}
-                  onCheckedChange={(enabled) => handleUpdateAutoSwitch({ enabled })}
-                  disabled={isLoadingAutoSwitch}
-                />
-              </div>
-
-              {autoSwitchSettings?.enabled && (
-                <>
-                  {/* Proactive Monitoring Section */}
-                  <div className="pl-6 space-y-4 pt-2 border-l-2 border-primary/20">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-sm font-medium flex items-center gap-2">
-                          <Activity className="h-3.5 w-3.5" />
-                          {t('accounts.autoSwitching.proactiveMonitoring')}
-                        </Label>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {t('accounts.autoSwitching.proactiveDescription')}
-                        </p>
-                      </div>
-                      <Switch
-                        checked={autoSwitchSettings?.proactiveSwapEnabled ?? true}
-                        onCheckedChange={(value) => handleUpdateAutoSwitch({ proactiveSwapEnabled: value })}
-                        disabled={isLoadingAutoSwitch}
-                      />
+            {autoSwitchSettings?.enabled && totalAccounts > 1 && (
+              <>
+                {/* Proactive Monitoring Section */}
+                <div className="pl-6 space-y-4 pt-2 border-l-2 border-primary/20">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm font-medium flex items-center gap-2">
+                        <Activity className="h-3.5 w-3.5" />
+                        {t('accounts.autoSwitching.proactiveMonitoring')}
+                      </Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {t('accounts.autoSwitching.proactiveDescription')}
+                      </p>
                     </div>
-
-                    {autoSwitchSettings?.proactiveSwapEnabled && (
-                      <>
-                        {/* Session threshold */}
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <Label htmlFor="session-threshold" className="text-sm">{t('accounts.autoSwitching.sessionThreshold')}</Label>
-                            <span className="text-sm font-mono">{autoSwitchSettings?.sessionThreshold ?? 95}%</span>
-                          </div>
-                          <input
-                            id="session-threshold"
-                            type="range"
-                            min="0"
-                            max="99"
-                            step="1"
-                            value={autoSwitchSettings?.sessionThreshold ?? 95}
-                            onChange={(e) => handleUpdateAutoSwitch({ sessionThreshold: parseInt(e.target.value, 10) })}
-                            disabled={isLoadingAutoSwitch}
-                            className="w-full"
-                            aria-describedby="session-threshold-description"
-                          />
-                          <p id="session-threshold-description" className="text-xs text-muted-foreground">
-                            {t('accounts.autoSwitching.sessionThresholdDescription')}
-                          </p>
-                        </div>
-
-                        {/* Weekly threshold */}
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <Label htmlFor="weekly-threshold" className="text-sm">{t('accounts.autoSwitching.weeklyThreshold')}</Label>
-                            <span className="text-sm font-mono">{autoSwitchSettings?.weeklyThreshold ?? 99}%</span>
-                          </div>
-                          <input
-                            id="weekly-threshold"
-                            type="range"
-                            min="0"
-                            max="99"
-                            step="1"
-                            value={autoSwitchSettings?.weeklyThreshold ?? 99}
-                            onChange={(e) => handleUpdateAutoSwitch({ weeklyThreshold: parseInt(e.target.value, 10) })}
-                            disabled={isLoadingAutoSwitch}
-                            className="w-full"
-                            aria-describedby="weekly-threshold-description"
-                          />
-                          <p id="weekly-threshold-description" className="text-xs text-muted-foreground">
-                            {t('accounts.autoSwitching.weeklyThresholdDescription')}
-                          </p>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Reactive Recovery Section */}
-                  <div className="pl-6 space-y-4 pt-2 border-l-2 border-orange-500/20">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-sm font-medium flex items-center gap-2">
-                          <AlertCircle className="h-3.5 w-3.5" />
-                          {t('accounts.autoSwitching.reactiveRecovery')}
-                        </Label>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {t('accounts.autoSwitching.reactiveDescription')}
-                        </p>
-                      </div>
-                      <Switch
-                        checked={autoSwitchSettings?.autoSwitchOnRateLimit ?? false}
-                        onCheckedChange={(value) => handleUpdateAutoSwitch({ autoSwitchOnRateLimit: value })}
-                        disabled={isLoadingAutoSwitch}
-                      />
-                    </div>
-
-                    {/* Auto-switch on auth failure */}
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-sm font-medium">
-                          {t('accounts.autoSwitching.autoSwitchOnAuthFailure')}
-                        </Label>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {t('accounts.autoSwitching.autoSwitchOnAuthFailureDescription')}
-                        </p>
-                      </div>
-                      <Switch
-                        checked={autoSwitchSettings?.autoSwitchOnAuthFailure ?? false}
-                        onCheckedChange={(value) => handleUpdateAutoSwitch({ autoSwitchOnAuthFailure: value })}
-                        disabled={isLoadingAutoSwitch}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Account Priority Order */}
-                  <div className="pt-4 border-t border-border/50">
-                    <AccountPriorityList
-                      accounts={unifiedAccounts}
-                      onReorder={handlePriorityReorder}
-                      isLoading={isSavingPriority}
+                    <Switch
+                      checked={autoSwitchSettings?.proactiveSwapEnabled ?? true}
+                      onCheckedChange={(value) => handleUpdateAutoSwitch({ proactiveSwapEnabled: value })}
+                      disabled={isLoadingAutoSwitch}
                     />
                   </div>
-                </>
-              )}
+
+                  {autoSwitchSettings?.proactiveSwapEnabled && (
+                    <>
+                      {/* Session threshold */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="session-threshold" className="text-sm">{t('accounts.autoSwitching.sessionThreshold')}</Label>
+                          <span className="text-sm font-mono">{autoSwitchSettings?.sessionThreshold ?? 95}%</span>
+                        </div>
+                        <input
+                          id="session-threshold"
+                          type="range"
+                          min="0"
+                          max="99"
+                          step="1"
+                          value={autoSwitchSettings?.sessionThreshold ?? 95}
+                          onChange={(e) => handleUpdateAutoSwitch({ sessionThreshold: parseInt(e.target.value, 10) })}
+                          disabled={isLoadingAutoSwitch}
+                          className="w-full"
+                          aria-describedby="session-threshold-description"
+                        />
+                        <p id="session-threshold-description" className="text-xs text-muted-foreground">
+                          {t('accounts.autoSwitching.sessionThresholdDescription')}
+                        </p>
+                      </div>
+
+                      {/* Weekly threshold */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="weekly-threshold" className="text-sm">{t('accounts.autoSwitching.weeklyThreshold')}</Label>
+                          <span className="text-sm font-mono">{autoSwitchSettings?.weeklyThreshold ?? 99}%</span>
+                        </div>
+                        <input
+                          id="weekly-threshold"
+                          type="range"
+                          min="0"
+                          max="99"
+                          step="1"
+                          value={autoSwitchSettings?.weeklyThreshold ?? 99}
+                          onChange={(e) => handleUpdateAutoSwitch({ weeklyThreshold: parseInt(e.target.value, 10) })}
+                          disabled={isLoadingAutoSwitch}
+                          className="w-full"
+                          aria-describedby="weekly-threshold-description"
+                        />
+                        <p id="weekly-threshold-description" className="text-xs text-muted-foreground">
+                          {t('accounts.autoSwitching.weeklyThresholdDescription')}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Reactive Recovery Section */}
+                <div className="pl-6 space-y-4 pt-2 border-l-2 border-orange-500/20">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm font-medium flex items-center gap-2">
+                        <AlertCircle className="h-3.5 w-3.5" />
+                        {t('accounts.autoSwitching.reactiveRecovery')}
+                      </Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {t('accounts.autoSwitching.reactiveDescription')}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={autoSwitchSettings?.autoSwitchOnRateLimit ?? false}
+                      onCheckedChange={(value) => handleUpdateAutoSwitch({ autoSwitchOnRateLimit: value })}
+                      disabled={isLoadingAutoSwitch}
+                    />
+                  </div>
+
+                  {/* Auto-switch on auth failure */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm font-medium">
+                        {t('accounts.autoSwitching.autoSwitchOnAuthFailure')}
+                      </Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {t('accounts.autoSwitching.autoSwitchOnAuthFailureDescription')}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={autoSwitchSettings?.autoSwitchOnAuthFailure ?? false}
+                      onCheckedChange={(value) => handleUpdateAutoSwitch({ autoSwitchOnAuthFailure: value })}
+                      disabled={isLoadingAutoSwitch}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Account Priority Order */}
+            <div className="pt-4 border-t border-border/50 space-y-3">
+              <div className="flex items-center justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setActiveTab('custom-endpoints');
+                    setIsAddDialogOpen(true);
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-2" />
+                  {t('accounts.priority.addProvider', 'Add API Provider')}
+                </Button>
+              </div>
+              <AccountPriorityList
+                accounts={unifiedAccounts}
+                onReorder={handlePriorityReorder}
+                isLoading={isSavingPriority}
+              />
             </div>
           </div>
-        )}
+        </div>
       </div>
     </SettingsSection>
   );

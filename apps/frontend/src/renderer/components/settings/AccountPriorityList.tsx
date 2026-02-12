@@ -36,6 +36,7 @@ import {
   AlertCircle,
   Users,
   Server,
+  Terminal,
   Clock,
   TrendingUp,
   Info
@@ -88,7 +89,7 @@ const getStatusKey = (sessionPercent?: number, weeklyPercent?: number, isRateLim
 export interface UnifiedAccount {
   id: string;
   name: string;
-  type: 'oauth' | 'api';
+  type: 'oauth' | 'api' | 'cli';
   displayName: string;
   identifier: string; // email for OAuth, baseUrl for API
   isActive: boolean;  // TRUE only for the ONE account currently in use
@@ -161,12 +162,18 @@ function SortableAccountItem({ account, index }: SortableAccountItemProps) {
       {/* Account icon - visual distinction between OAuth and API */}
       <div className={cn(
         "h-8 w-8 rounded-full flex items-center justify-center shrink-0",
-        account.type === 'oauth' ? "bg-primary/10 text-primary" : "bg-secondary text-secondary-foreground"
+        account.type === 'oauth'
+          ? "bg-primary/10 text-primary"
+          : account.type === 'api'
+            ? "bg-secondary text-secondary-foreground"
+            : "bg-cyan-500/10 text-cyan-500"
       )}>
         {account.type === 'oauth' ? (
           <Users className="h-4 w-4" />
-        ) : (
+        ) : account.type === 'api' ? (
           <Server className="h-4 w-4" />
+        ) : (
+          <Terminal className="h-4 w-4" />
         )}
       </div>
 
@@ -178,7 +185,11 @@ function SortableAccountItem({ account, index }: SortableAccountItemProps) {
           </span>
           {/* Account type indicator */}
           <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 bg-muted rounded">
-            {account.type === 'oauth' ? t('accounts.priority.typeOAuth') : t('accounts.priority.typeAPI')}
+            {account.type === 'oauth'
+              ? t('accounts.priority.typeOAuth')
+              : account.type === 'api'
+                ? t('accounts.priority.typeAPI')
+                : t('accounts.priority.typeCLI', 'CLI')}
           </span>
           {/* Status badges - only ONE account should have "In Use" */}
           {account.isActive && (
@@ -198,8 +209,8 @@ function SortableAccountItem({ account, index }: SortableAccountItemProps) {
           {account.identifier}
         </span>
 
-        {/* Usage bars for OAuth accounts */}
-        {account.type === 'oauth' && account.isAvailable && account.sessionPercent !== undefined && (
+        {/* Usage bars for accounts with available usage metrics */}
+        {account.isAvailable && (account.sessionPercent !== undefined || account.weeklyPercent !== undefined) && (
           <div className="flex items-center gap-3 mt-2">
             {/* Session usage */}
             <Tooltip>
@@ -208,12 +219,12 @@ function SortableAccountItem({ account, index }: SortableAccountItemProps) {
                   <Clock className="h-3 w-3 text-muted-foreground/70 shrink-0" />
                   <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
                     <div
-                      className={cn("h-full rounded-full transition-all", getBarColorClass(account.sessionPercent))}
-                      style={{ width: `${Math.min(account.sessionPercent, 100)}%` }}
+                      className={cn("h-full rounded-full transition-all", getBarColorClass(account.sessionPercent ?? 0))}
+                      style={{ width: `${Math.min(account.sessionPercent ?? 0, 100)}%` }}
                     />
                   </div>
-                  <span className={cn("text-[10px] tabular-nums font-medium w-8", getColorClass(account.sessionPercent))}>
-                    {Math.round(account.sessionPercent)}%
+                  <span className={cn("text-[10px] tabular-nums font-medium w-8", getColorClass(account.sessionPercent ?? 0))}>
+                    {Math.round(account.sessionPercent ?? 0)}%
                   </span>
                 </div>
               </TooltipTrigger>
@@ -267,6 +278,16 @@ function SortableAccountItem({ account, index }: SortableAccountItemProps) {
           </div>
         )}
 
+        {/* CLI tool not installed */}
+        {account.type === 'cli' && !account.isAvailable && (
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <AlertCircle className="h-3 w-3 text-destructive" />
+            <span className="text-[10px] text-destructive">
+              {t('accounts.priority.needsInstall', 'Not installed')}
+            </span>
+          </div>
+        )}
+
         {/* Duplicate usage warning - may indicate same underlying Anthropic account */}
         {account.type === 'oauth' && account.isDuplicateUsage && account.isAvailable && (
           <Tooltip>
@@ -302,12 +323,21 @@ function SortableAccountItem({ account, index }: SortableAccountItemProps) {
         )}
       </div>
 
-      {/* Right side badge for API profiles */}
-      {account.type === 'api' && (
+      {/* Right side badge for API profiles without usage metrics */}
+      {account.type === 'api' && account.hasUnlimitedUsage && (
         <div className="flex items-center gap-1.5 shrink-0">
           <span className="text-[10px] bg-muted text-muted-foreground px-2 py-1 rounded flex items-center gap-1">
             <Infinity className="h-3 w-3" />
             {t('accounts.priority.payPerUse')}
+          </span>
+        </div>
+      )}
+
+      {/* Right side badge for CLI tool providers */}
+      {account.type === 'cli' && (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[10px] bg-cyan-500/10 text-cyan-500 px-2 py-1 rounded">
+            {t('accounts.priority.localCli', 'Local CLI')}
           </span>
         </div>
       )}

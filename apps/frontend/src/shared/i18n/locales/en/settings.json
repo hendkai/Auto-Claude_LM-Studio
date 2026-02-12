@@ -532,6 +532,135 @@
       "authProcessFailedDescription": "The authentication terminal could not be created. Please try again or check the logs for more details."
     }
   },
+  "accounts": {
+    "title": "Accounts",
+    "description": "Manage Claude accounts and API endpoints",
+    "tabs": {
+      "claudeCode": "Claude Code",
+      "customEndpoints": "Custom Endpoints",
+      "cliTools": "CLI Tools"
+    },
+    "claudeCode": {
+      "description": "Add multiple Claude subscriptions to automatically switch when you hit rate limits.",
+      "noAccountsYet": "No accounts configured",
+      "default": "Default",
+      "active": "Active",
+      "authenticated": "Authenticated",
+      "needsAuth": "Auth required",
+      "authenticate": "Authenticate",
+      "authenticating": "Authenticating...",
+      "setActive": "Set active",
+      "manualTokenEntry": "Manual token entry",
+      "runSetupToken": "Run claude and type /login to authenticate",
+      "tokenPlaceholder": "sk-ant-oat01-...",
+      "emailPlaceholder": "Email (optional, for display)",
+      "saveToken": "Save token",
+      "accountNamePlaceholder": "Account name (e.g., Work, Personal)"
+    },
+    "customEndpoints": {
+      "description": "Configure custom Anthropic-compatible API endpoints",
+      "addButton": "Add profile",
+      "presetHint": "Tip: Add profiles from presets like OpenCode, GLM, Kimi, or Codex to include them in priority order.",
+      "activeBadge": "Active",
+      "customModels": "Custom models: {{models}}",
+      "setActive": {
+        "label": "Set active",
+        "loading": "Setting..."
+      },
+      "switchToOauth": {
+        "label": "Use Claude Code",
+        "loading": "Switching..."
+      },
+      "tooltips": {
+        "edit": "Edit profile",
+        "deleteActive": "Cannot delete active profile",
+        "deleteInactive": "Delete profile"
+      },
+      "empty": {
+        "title": "No custom endpoints",
+        "description": "Configure custom Anthropic-compatible API endpoints to use alternative providers.",
+        "action": "Add profile"
+      },
+      "dialog": {
+        "deleteTitle": "Delete profile",
+        "deleteDescription": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
+        "cancel": "Cancel",
+        "delete": "Delete",
+        "deleting": "Deleting..."
+      }
+    },
+    "cliTools": {
+      "description": "Manage local CLI coding agents (Claude Code, Kimi Code, Codex).",
+      "openCodeHint": "OpenCode is configured as an API provider via Custom Endpoints."
+    },
+    "autoSwitching": {
+      "title": "Automatic account switching",
+      "description": "Automatically switch between accounts to avoid interruptions. Configure proactive monitoring to switch before limits are reached.",
+      "enableAutoSwitching": "Enable automatic switching",
+      "masterSwitch": "Master switch for all auto-swap features",
+      "proactiveMonitoring": "Proactive monitoring",
+      "proactiveDescription": "Check usage regularly and switch before limits are reached",
+      "sessionThreshold": "Session usage threshold",
+      "sessionThresholdDescription": "Switch when session usage reaches this level (recommended: 95%)",
+      "weeklyThreshold": "Weekly usage threshold",
+      "weeklyThresholdDescription": "Switch when weekly usage reaches this level (recommended: 99%)",
+      "reactiveRecovery": "Reactive recovery",
+      "reactiveDescription": "Auto-switch if an unexpected rate limit is hit",
+      "autoSwitchOnAuthFailure": "Auto-switch on auth failure",
+      "autoSwitchOnAuthFailureDescription": "Automatically switch to another authenticated account when authentication fails"
+    },
+    "priority": {
+      "title": "Account priority order",
+      "description": "Drag to reorder. The system switches to the next available account in this order.",
+      "addProvider": "Add API Provider",
+      "noAccounts": "No accounts configured. Add accounts above to set priority.",
+      "noEmail": "No email",
+      "active": "Active",
+      "inUse": "In use",
+      "next": "Next",
+      "unlimited": "Unlimited",
+      "unavailable": "Unavailable",
+      "typeOAuth": "OAuth",
+      "typeAPI": "API",
+      "payPerUse": "Pay per use",
+      "needsAuth": "Not authenticated",
+      "duplicateUsage": "Duplicate usage detected",
+      "duplicateUsageHint": "This profile has identical usage to another profile, which may indicate the same underlying Anthropic account. Re-authenticate with a different account to fix this.",
+      "needsReauth": "Re-auth required",
+      "needsReauthHint": "This profile has an invalid refresh token. Re-authenticate this profile.",
+      "sessionUsage": "Session usage (5-hour window)",
+      "weeklyUsage": "Weekly usage (7-day window)",
+      "oauthSection": "Claude accounts (used first)",
+      "apiSection": "Fallback endpoints (used when Claude accounts are exhausted)",
+      "tipTitle": "How priority works",
+      "tipDescription": "Claude accounts are included in your subscription and are used first. API endpoints are billed per request and are used as fallback when Claude accounts hit limits.",
+      "status": {
+        "healthy": "Healthy",
+        "moderate": "Moderate",
+        "highUsage": "High usage",
+        "nearLimit": "Near limit",
+        "rateLimited": "Rate limited"
+      }
+    },
+    "toast": {
+      "loadProfilesFailed": "Failed to load profiles",
+      "addProfileFailed": "Failed to add profile",
+      "deleteProfileFailed": "Failed to delete profile",
+      "renameProfileFailed": "Failed to rename profile",
+      "setActiveProfileFailed": "Failed to set active profile",
+      "authFailed": "Authentication failed",
+      "tokenSaved": "Token saved",
+      "tokenSavedDescription": "Your token was saved successfully.",
+      "tokenSaveFailed": "Failed to save token",
+      "settingsUpdateFailed": "Failed to update settings",
+      "tryAgain": "Please try again."
+    },
+    "alerts": {
+      "profileCreatedAuthFailed": "Profile created but auth preparation failed: {{error}}",
+      "authPrepareFailed": "Failed to prepare authentication: {{error}}",
+      "authStartFailedMessage": "Failed to start authentication. Please try again."
+    }
+  },
   "debug": {
     "title": "Debug & Logs",
     "description": "Access logs and debug information for troubleshooting",

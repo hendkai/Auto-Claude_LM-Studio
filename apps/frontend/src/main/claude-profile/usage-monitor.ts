@@ -11,7 +11,7 @@
 
 import { EventEmitter } from 'events';
 import { getClaudeProfileManager } from '../claude-profile-manager';
-import { ClaudeUsageSnapshot } from '../../shared/types/agent';
+import { ClaudeUsageSnapshot, AllProfilesUsage, ProfileUsageSummary } from '../../shared/types/agent';
 import { loadProfilesFile } from '../services/profile';
 import { APIProfile } from '../../shared/types/profile';
 
@@ -38,6 +38,11 @@ export class UsageMonitor extends EventEmitter {
   private currentUsage: ClaudeUsageSnapshot | null = null;
   private isChecking = false;
   private useApiMethod = true; // Try API first, fall back to CLI if it fails
+  private allProfilesUsageCache: { data: AllProfilesUsage | null; fetchedAtMs: number } = {
+    data: null,
+    fetchedAtMs: 0
+  };
+  private static ALL_PROFILES_USAGE_CACHE_MS = 60 * 1000;
   
   // Swap loop protection: track profiles that recently failed auth
   private authFailedProfiles: Map<string, number> = new Map(); // profileId -> timestamp
@@ -114,6 +119,113 @@ export class UsageMonitor extends EventEmitter {
   }
 
   /**
+   * Fetch usage summaries for all configured OAuth/API profiles.
+   * Used by Account Priority UI for per-profile usage visualization.
+   */
+  async getAllProfilesUsage(forceRefresh: boolean = false): Promise<AllProfilesUsage | null> {
+    const now = Date.now();
+    if (
+      !forceRefresh &&
+      this.allProfilesUsageCache.data &&
+      now - this.allProfilesUsageCache.fetchedAtMs < UsageMonitor.ALL_PROFILES_USAGE_CACHE_MS
+    ) {
+      return this.allProfilesUsageCache.data;
+    }
+
+    const profileManager = getClaudeProfileManager();
+    const oauthProfiles = profileManager.getSettings().profiles;
+
+    let apiProfiles: APIProfile[] = [];
+    try {
+      const profilesFile = await loadProfilesFile();
+      apiProfiles = profilesFile.profiles || [];
+    } catch (error) {
+      console.warn('[UsageMonitor] Failed to load API profiles for all-profiles usage:', error);
+    }
+
+    const oauthSummaries = await Promise.all(
+      oauthProfiles.map(async (profile): Promise<ProfileUsageSummary> => {
+        const fallbackSession = profile.usage?.sessionUsagePercent ?? 0;
+        const fallbackWeekly = profile.usage?.weeklyUsagePercent ?? 0;
+        const rateLimitStatus = profileManager.isProfileRateLimited(profile.id);
+
+        let usage: ClaudeUsageSnapshot | null = null;
+        let needsReauthentication = false;
+        const token = profileManager.getProfileToken(profile.id);
+
+        if (token) {
+          try {
+            usage = await this.fetchUsageViaAPI(token, profile.id, profile.name);
+            if (!usage) {
+              usage = await this.fetchGlmUsage(token, profile.id, profile.name);
+            }
+          } catch (error: any) {
+            if (error?.statusCode === 401 || error?.statusCode === 403) {
+              needsReauthentication = true;
+            } else if (this.isDebug) {
+              console.warn('[UsageMonitor] OAuth usage fetch failed:', profile.id, error);
+            }
+          }
+        }
+
+        if (usage) {
+          profileManager.updateProfileUsageFromAPI(profile.id, usage.sessionPercent, usage.weeklyPercent);
+        }
+
+        return {
+          profileId: profile.id,
+          profileName: profile.name,
+          profileType: 'oauth',
+          sessionPercent: usage?.sessionPercent ?? fallbackSession,
+          weeklyPercent: usage?.weeklyPercent ?? fallbackWeekly,
+          isRateLimited: rateLimitStatus.limited,
+          rateLimitType: rateLimitStatus.type,
+          needsReauthentication,
+          customUsageDetails: usage?.customUsageDetails,
+          fetchedAt: usage?.fetchedAt ?? new Date()
+        };
+      })
+    );
+
+    const apiSummaries = await Promise.all(
+      apiProfiles.map(async (profile): Promise<ProfileUsageSummary> => {
+        let usage: ClaudeUsageSnapshot | null = null;
+        try {
+          usage = await this.fetchApiProfileUsage(profile);
+        } catch (error) {
+          if (this.isDebug) {
+            console.warn('[UsageMonitor] API profile usage fetch failed:', profile.id, error);
+          }
+        }
+
+        return {
+          profileId: profile.id,
+          profileName: profile.name,
+          profileType: 'api',
+          sessionPercent: usage?.sessionPercent,
+          weeklyPercent: usage?.weeklyPercent,
+          isRateLimited: false,
+          customUsageDetails: usage?.customUsageDetails,
+          fetchedAt: usage?.fetchedAt ?? new Date()
+        };
+      })
+    );
+
+    const allProfilesUsage: AllProfilesUsage = {
+      allProfiles: [...oauthSummaries, ...apiSummaries],
+      fetchedAt: new Date()
+    };
+
+    this.allProfilesUsageCache = {
+      data: allProfilesUsage,
+      fetchedAtMs: now
+    };
+
+    this.emit('all-profiles-usage-updated', allProfilesUsage);
+    return allProfilesUsage;
+  }
+
+  /**
    * Check usage and trigger swap if thresholds exceeded
    */
   private async checkUsageAndSwap(): Promise<void> {
@@ -136,6 +248,11 @@ export class UsageMonitor extends EventEmitter {
         if (usage) {
           this.currentUsage = usage;
           this.emit('usage-updated', usage);
+          void this.getAllProfilesUsage(false).catch((error) => {
+            if (this.isDebug) {
+              console.warn('[UsageMonitor] Failed to refresh all-profiles usage cache:', error);
+            }
+          });
           return;
         }
       }
@@ -162,6 +279,11 @@ export class UsageMonitor extends EventEmitter {
 
       // Emit usage update for UI
       this.emit('usage-updated', usage);
+      void this.getAllProfilesUsage(false).catch((error) => {
+        if (this.isDebug) {
+          console.warn('[UsageMonitor] Failed to refresh all-profiles usage cache:', error);
+        }
+      });
 
       // Check thresholds
       const settings = profileManager.getAutoSwitchSettings();
