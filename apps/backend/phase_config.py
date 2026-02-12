@@ -415,7 +415,21 @@ def get_phase_model(
     """
     # Apply phase-specific provider/model override chain from frontend config.
     # This enables per-phase provider selection with fallback behavior.
-    apply_phase_provider_env(phase)
+    runtime_phase_config_active = bool(
+        os.environ.get(PHASE_PROVIDER_ENV_CONFIG_KEY, "").strip()
+    )
+    phase_override_applied = apply_phase_provider_env(phase)
+
+    # When runtime phase-provider config is active, only use the selected
+    # provider/model from that runtime config for the phase. Do NOT fall back to
+    # task_metadata phaseModels here because those can contain unresolved CLI
+    # placeholders (e.g., "codex") from UI state.
+    if runtime_phase_config_active:
+        if phase_override_applied:
+            env_model = os.environ.get("ANTHROPIC_MODEL")
+            if env_model:
+                return resolve_model_id(env_model)
+        return resolve_model_id(DEFAULT_PHASE_MODELS[phase])
 
     # CLI argument takes precedence
     if cli_model:
@@ -465,7 +479,20 @@ def get_phase_model_betas(
         List of beta header strings, or empty list if none required
     """
     # Keep provider/model env in sync with get_phase_model() for this phase.
-    apply_phase_provider_env(phase)
+    runtime_phase_config_active = bool(
+        os.environ.get(PHASE_PROVIDER_ENV_CONFIG_KEY, "").strip()
+    )
+    phase_override_applied = apply_phase_provider_env(phase)
+
+    # Mirror get_phase_model() behavior for runtime phase-provider config:
+    # if no usable provider entry for the phase, use default phase model betas
+    # rather than task metadata fallback.
+    if runtime_phase_config_active:
+        if phase_override_applied:
+            env_model = os.environ.get("ANTHROPIC_MODEL")
+            if env_model:
+                return get_model_betas(env_model)
+        return get_model_betas(DEFAULT_PHASE_MODELS[phase])
 
     # Determine the model shorthand (before resolution to full ID)
     if cli_model:
