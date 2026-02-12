@@ -9,6 +9,32 @@ import subprocess
 import sys
 from pathlib import Path
 
+from phase_config import (
+    PHASE_PROVIDER_CLI_KIND,
+    PHASE_PROVIDER_CLI_PATH_KEY,
+    PHASE_PROVIDER_CLI_TOOL_KEY,
+    PHASE_PROVIDER_KIND_KEY,
+)
+
+
+def _build_script_env() -> dict[str, str]:
+    """Build env for subprocess script execution.
+
+    Some scripts expect Claude CLI protocol and fail if CLAUDE_CLI_PATH points
+    to external CLIs such as codex/kimi.
+    """
+    import os
+
+    env = os.environ.copy()
+    provider_kind = env.get(PHASE_PROVIDER_KIND_KEY, "").strip().lower()
+    provider_tool = env.get(PHASE_PROVIDER_CLI_TOOL_KEY, "").strip().lower()
+    if provider_kind == PHASE_PROVIDER_CLI_KIND and provider_tool not in {
+        "",
+        "claude-code",
+    }:
+        env.pop(PHASE_PROVIDER_CLI_PATH_KEY, None)
+    return env
+
 
 def run_script(project_dir: Path, script: str, args: list[str]) -> tuple[bool, str]:
     """
@@ -33,6 +59,7 @@ def run_script(project_dir: Path, script: str, args: list[str]) -> tuple[bool, s
         result = subprocess.run(
             cmd,
             cwd=project_dir,
+            env=_build_script_env(),
             capture_output=True,
             text=True,
             timeout=300,

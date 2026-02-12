@@ -137,9 +137,23 @@ def create_simple_client(
     if betas:
         options_kwargs["betas"] = betas
 
-    # Optional: Allow CLI path override via environment variable
+    # Optional: Allow CLI path override via environment variable.
+    # Skip overrides for external non-Claude CLIs (codex/kimi), because the
+    # Claude SDK protocol is incompatible with their CLI argument format.
+    provider_kind = os.environ.get("AUTOCLAUDE_PROVIDER_KIND", "").strip().lower()
+    provider_tool = os.environ.get("AUTOCLAUDE_CLI_TOOL", "").strip().lower()
+    external_non_claude_cli = provider_kind == "cli" and provider_tool not in {
+        "",
+        "claude-code",
+    }
+
     env_cli_path = os.environ.get("CLAUDE_CLI_PATH")
-    if env_cli_path and validate_cli_path(env_cli_path):
+    if external_non_claude_cli and env_cli_path:
+        logger.info(
+            "Ignoring CLAUDE_CLI_PATH override for simple client (external CLI '%s')",
+            provider_tool,
+        )
+    elif env_cli_path and validate_cli_path(env_cli_path):
         options_kwargs["cli_path"] = env_cli_path
         logger.info(f"Using CLAUDE_CLI_PATH override: {env_cli_path}")
 

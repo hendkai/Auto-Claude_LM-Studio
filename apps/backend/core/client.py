@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from core.fast_mode import ensure_fast_mode_in_user_settings
+from core.external_cli_client import ExternalCLIClient
 from core.platform import (
     is_windows,
     validate_cli_path,
@@ -480,6 +481,28 @@ def _resolve_external_cli_model(cli_tool: str, requested_model: str | None) -> s
     if normalized_model in placeholder_models.get(normalized_tool, set()):
         return None
 
+    # Kimi CLI resolves model from its own config and currently rejects the
+    # phase-level model aliases used in the app UI. Use CLI default model.
+    if normalized_tool == "kimi-code":
+        logger.info(
+            "External CLI '%s': using CLI default model (requested='%s')",
+            normalized_tool,
+            requested_model,
+        )
+        return None
+
+    if normalized_tool == "codex" and (
+        normalized_model.startswith("glm")
+        or normalized_model.startswith("kimi")
+        or normalized_model.startswith("claude-")
+    ):
+        logger.warning(
+            "External CLI '%s': ignoring incompatible model '%s' and using CLI default",
+            normalized_tool,
+            requested_model,
+        )
+        return None
+
     return requested_model
 
 
@@ -494,7 +517,7 @@ def create_client(
     betas: list[str] | None = None,
     effort_level: str | None = None,
     fast_mode: bool = False,
-) -> ClaudeSDKClient:
+) -> ClaudeSDKClient | ExternalCLIClient:
     """
     Create a Claude Agent SDK client with multi-layered security.
 
@@ -890,6 +913,31 @@ def create_client(
                 model,
             )
 
+    # Codex/Kimi CLIs do not implement Claude CLI's stream-json subprocess protocol.
+    # Run them through a dedicated adapter instead of ClaudeSDKClient.
+    if external_cli_active and external_cli_tool in {"codex", "kimi-code"}:
+        cli_path = os.environ.get("CLAUDE_CLI_PATH", "").strip()
+        if not cli_path:
+            raise ValueError(
+                f"External CLI provider '{external_cli_tool}' is selected but CLAUDE_CLI_PATH is empty."
+            )
+        if not validate_cli_path(cli_path):
+            raise ValueError(
+                f"External CLI path is invalid or not executable: {cli_path}"
+            )
+        logger.info(
+            "Using direct external CLI adapter for '%s' at %s",
+            external_cli_tool,
+            cli_path,
+        )
+        return ExternalCLIClient(
+            cli_tool=external_cli_tool,
+            cli_path=cli_path,
+            project_dir=project_dir,
+            model=effective_model,
+            env=sdk_env,
+        )
+
     options_kwargs: dict[str, Any] = {
         "system_prompt": base_prompt,
         "allowed_tools": allowed_tools_list,
@@ -921,10 +969,16 @@ def create_client(
     if fast_mode:
         options_kwargs["setting_sources"] = ["user"]
 
-    # Optional: Allow CLI path override via environment variable
-    # The SDK bundles its own CLI, but users can override if needed
+    # Optional: Allow CLI path override via environment variable.
+    # Skip for external non-Claude CLIs; either they are handled by the direct
+    # adapter above or are incompatible with Claude SDK's subprocess protocol.
     env_cli_path = os.environ.get("CLAUDE_CLI_PATH")
-    if env_cli_path and validate_cli_path(env_cli_path):
+    if external_cli_active and env_cli_path:
+        logger.info(
+            "Skipping CLAUDE_CLI_PATH override for Claude SDK client (external CLI '%s')",
+            external_cli_tool or "unknown",
+        )
+    elif env_cli_path and validate_cli_path(env_cli_path):
         options_kwargs["cli_path"] = env_cli_path
         logger.info(f"Using CLAUDE_CLI_PATH override: {env_cli_path}")
 

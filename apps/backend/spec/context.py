@@ -6,10 +6,36 @@ Discovers relevant files and context for the task.
 """
 
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+from phase_config import (
+    PHASE_PROVIDER_CLI_KIND,
+    PHASE_PROVIDER_CLI_PATH_KEY,
+    PHASE_PROVIDER_CLI_TOOL_KEY,
+    PHASE_PROVIDER_KIND_KEY,
+)
+
+
+def _build_script_env() -> dict[str, str]:
+    """Build subprocess env for legacy context scripts.
+
+    Legacy project scripts use Claude SDK/CLI internals. If a phase selected an
+    external non-Claude CLI (codex/kimi), avoid forwarding CLAUDE_CLI_PATH to
+    those scripts because the CLI argument protocol is incompatible.
+    """
+    env = os.environ.copy()
+    provider_kind = env.get(PHASE_PROVIDER_KIND_KEY, "").strip().lower()
+    provider_tool = env.get(PHASE_PROVIDER_CLI_TOOL_KEY, "").strip().lower()
+    if provider_kind == PHASE_PROVIDER_CLI_KIND and provider_tool not in {
+        "",
+        "claude-code",
+    }:
+        env.pop(PHASE_PROVIDER_CLI_PATH_KEY, None)
+    return env
 
 
 def run_context_discovery(
@@ -54,6 +80,7 @@ def run_context_discovery(
         result = subprocess.run(
             args,
             cwd=project_dir,
+            env=_build_script_env(),
             capture_output=True,
             text=True,
             timeout=300,
