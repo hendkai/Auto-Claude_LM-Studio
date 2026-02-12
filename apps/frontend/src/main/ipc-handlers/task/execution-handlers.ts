@@ -19,6 +19,7 @@ import {
 import { findTaskWorktree } from '../../worktree-paths';
 import { projectStore } from '../../project-store';
 import { getIsolatedGitEnv } from '../../utils/git-isolation';
+import { buildPhaseProviderEnvConfig, hasProviderAuthInConfig } from '../../services/profile/profile-env-utils';
 
 /**
  * Atomic file write to prevent TOCTOU race conditions.
@@ -100,6 +101,21 @@ async function ensureProfileManagerInitialized(): Promise<
   }
 }
 
+async function hasTaskProviderAuth(taskMetadata: { phaseModelsV3?: unknown } | undefined): Promise<boolean> {
+  const phaseModelsV3 = taskMetadata?.phaseModelsV3;
+  if (!phaseModelsV3 || typeof phaseModelsV3 !== 'object') {
+    return false;
+  }
+
+  try {
+    const config = await buildPhaseProviderEnvConfig(phaseModelsV3 as any);
+    return hasProviderAuthInConfig(config);
+  } catch (error) {
+    console.warn('[TaskExecution] Failed to evaluate provider auth config:', error);
+    return false;
+  }
+}
+
 /**
  * Register task execution handlers (start, stop, review, status management, recovery)
  */
@@ -167,13 +183,16 @@ export function registerTaskExecutionHandlers(
         return;
       }
 
-      // Check authentication - Claude requires valid auth to run tasks
-      if (!profileManager.hasValidAuth()) {
+      const hasProviderAuth = await hasTaskProviderAuth(task.metadata);
+      // Check authentication:
+      // 1) valid Claude OAuth/profile auth, OR
+      // 2) at least one phase provider entry with usable credentials.
+      if (!profileManager.hasValidAuth() && !hasProviderAuth) {
         console.warn('[TASK_START] No valid authentication for active profile');
         mainWindow.webContents.send(
           IPC_CHANNELS.TASK_ERROR,
           taskId,
-          'Claude authentication required. Please go to Settings > Claude Profiles and authenticate your account, or set an OAuth token.'
+          'Authentication required. Please authenticate Claude in Settings or configure a phase provider with API credentials.'
         );
         return;
       }
@@ -233,7 +252,8 @@ export function registerTaskExecutionHandlers(
             parallel: false,  // Sequential for planning phase
             workers: 1,
             baseBranch,
-            useWorktree: task.metadata?.useWorktree
+            useWorktree: task.metadata?.useWorktree,
+            metadata: task.metadata
           }
         );
       } else {
@@ -249,7 +269,8 @@ export function registerTaskExecutionHandlers(
             parallel: false,
             workers: 1,
             baseBranch,
-            useWorktree: task.metadata?.useWorktree
+            useWorktree: task.metadata?.useWorktree,
+            metadata: task.metadata
           }
         );
       }
@@ -523,7 +544,7 @@ export function registerTaskExecutionHandlers(
         // The QA process needs to run where the implementation_plan.json with completed subtasks is
         const qaProjectPath = hasWorktree ? worktreePath : project.path;
         console.warn('[TASK_REVIEW] Starting QA process with projectPath:', qaProjectPath);
-        agentManager.startQAProcess(taskId, qaProjectPath, task.specId);
+        agentManager.startQAProcess(taskId, qaProjectPath, task.specId, task.metadata);
 
         const mainWindow = getMainWindow();
         if (mainWindow) {
@@ -761,16 +782,17 @@ export function registerTaskExecutionHandlers(
             return { success: false, error: initResult.error };
           }
           const profileManager = initResult.profileManager;
-          if (!profileManager.hasValidAuth()) {
+          const hasProviderAuth = await hasTaskProviderAuth(task.metadata);
+          if (!profileManager.hasValidAuth() && !hasProviderAuth) {
             console.warn('[TASK_UPDATE_STATUS] No valid authentication for active profile');
             if (mainWindow) {
               mainWindow.webContents.send(
                 IPC_CHANNELS.TASK_ERROR,
                 taskId,
-                'Claude authentication required. Please go to Settings > Claude Profiles and authenticate your account, or set an OAuth token.'
+                'Authentication required. Please authenticate Claude in Settings or configure a phase provider with API credentials.'
               );
             }
-            return { success: false, error: 'Claude authentication required' };
+            return { success: false, error: 'Authentication required' };
           }
 
           const autoStartBegin = Date.now();
@@ -811,7 +833,8 @@ export function registerTaskExecutionHandlers(
                 parallel: false,
                 workers: 1,
                 baseBranch: baseBranchForUpdate,
-                useWorktree: task.metadata?.useWorktree
+                useWorktree: task.metadata?.useWorktree,
+                metadata: task.metadata
               }
             );
             console.log('[TASK_UPDATE_STATUS] startTaskExecution (no subtasks) completed in', Date.now() - execStartTime, 'ms');
@@ -828,7 +851,8 @@ export function registerTaskExecutionHandlers(
                 parallel: false,
                 workers: 1,
                 baseBranch: baseBranchForUpdate,
-                useWorktree: task.metadata?.useWorktree
+                useWorktree: task.metadata?.useWorktree,
+                metadata: task.metadata
               }
             );
             console.log('[TASK_UPDATE_STATUS] startTaskExecution (has subtasks) completed in', Date.now() - execStartTime, 'ms');
@@ -1118,7 +1142,8 @@ export function registerTaskExecutionHandlers(
             };
           }
           const profileManager = initResult.profileManager;
-          if (!profileManager.hasValidAuth()) {
+          const hasProviderAuth = await hasTaskProviderAuth(task.metadata);
+          if (!profileManager.hasValidAuth() && !hasProviderAuth) {
             console.warn('[Recovery] Auth check failed, cannot auto-restart task');
             // Recovery succeeded but we can't restart without auth
             return {
@@ -1127,7 +1152,7 @@ export function registerTaskExecutionHandlers(
                 taskId,
                 recovered: true,
                 newStatus,
-                message: 'Task recovered but cannot restart: Claude authentication required. Please go to Settings > Claude Profiles and authenticate your account.',
+                message: 'Task recovered but cannot restart: authentication required (Claude OAuth or phase provider API credentials).',
                 autoRestarted: false
               }
             };
@@ -1184,7 +1209,8 @@ export function registerTaskExecutionHandlers(
                   parallel: false,
                   workers: 1,
                   baseBranch: baseBranchForRecovery,
-                  useWorktree: task.metadata?.useWorktree
+                  useWorktree: task.metadata?.useWorktree,
+                  metadata: task.metadata
                 }
               );
             }

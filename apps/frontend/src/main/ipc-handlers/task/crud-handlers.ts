@@ -9,6 +9,49 @@ import { AgentManager } from '../../agent';
 import { findTaskAndProject } from './shared';
 import { readSettingsFile } from '../../settings-utils';
 
+type PhaseKey = 'spec' | 'planning' | 'coding' | 'qa';
+const PHASE_KEYS: PhaseKey[] = ['spec', 'planning', 'coding', 'qa'];
+
+function hasConfiguredProviderAndModel(entry: unknown): entry is { profileId: string; model: string } {
+  if (!entry || typeof entry !== 'object') return false;
+  const maybeEntry = entry as { profileId?: unknown; model?: unknown };
+  return (
+    typeof maybeEntry.profileId === 'string' &&
+    maybeEntry.profileId.trim().length > 0 &&
+    typeof maybeEntry.model === 'string' &&
+    maybeEntry.model.trim().length > 0
+  );
+}
+
+/**
+ * Keep legacy phaseModels in sync with V3 fallback chains.
+ * Empty providers are skipped, so the next valid fallback is used automatically.
+ */
+function syncLegacyPhaseModelsFromV3(metadata: TaskMetadata | undefined): void {
+  if (!metadata?.phaseModelsV3 || typeof metadata.phaseModelsV3 !== 'object') {
+    return;
+  }
+
+  const phaseModels: Partial<Record<PhaseKey, string>> = {};
+
+  for (const phase of PHASE_KEYS) {
+    const chain = (metadata.phaseModelsV3 as Record<string, unknown>)[phase];
+    if (!Array.isArray(chain)) {
+      continue;
+    }
+
+    const selected = chain.find((entry) => hasConfiguredProviderAndModel(entry));
+    if (selected) {
+      phaseModels[phase] = selected.model.trim();
+    }
+  }
+
+  if (Object.keys(phaseModels).length > 0) {
+    metadata.isAutoProfile = true;
+    metadata.phaseModels = phaseModels as TaskMetadata['phaseModels'];
+  }
+}
+
 /**
  * Register task CRUD (Create, Read, Update, Delete) handlers
  */
@@ -142,37 +185,16 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
         taskMetadata.attachedImages = savedImages;
       }
 
-      // CRITICAL FIX: Add V3 primary model configuration to task_metadata.json
-      // Backend phase_config.py reads from this file to determine which model to use.
-      // Without this, it falls back to default Sonnet even if GLM or other models are configured.
-      // This ensures the primary model from each phase's fallback chain is used.
+      // Keep V3 model/provider chain and legacy phaseModels in sync.
+      // Legacy phaseModels are still consumed by backend phase_config.py.
       try {
         const settings = await readSettingsFile();
-        const phaseModelsV3 = settings?.customPhaseModelsV3;
-
-        if (phaseModelsV3) {
-          // Extract primary (first) model from each phase's fallback chain
-          // Backend expects: { isAutoProfile: true, phaseModels: { spec, planning, coding, qa } }
-          // Convert ProfileModelPair to just the model name (backend uses env vars for profile)
-          const phaseModels: Record<string, string> = {};
-
-          for (const phase of ['spec', 'planning', 'coding', 'qa'] as const) {
-            const fallbackChain = (phaseModelsV3 as any)[phase];
-            if (fallbackChain && fallbackChain.length > 0) {
-              // Use primary model (index 0)
-              phaseModels[phase] = fallbackChain[0].model;
-            }
-          }
-
-          // Only add if we have at least one phase configured
-          if (Object.keys(phaseModels).length > 0) {
-            taskMetadata.isAutoProfile = true;
-            taskMetadata.phaseModels = phaseModels as any;
-            console.warn('[TASK_CREATE] Added V3 primary model config to metadata:', phaseModels);
-          }
+        if (!taskMetadata.phaseModelsV3 && settings?.customPhaseModelsV3) {
+          taskMetadata.phaseModelsV3 = settings.customPhaseModelsV3;
         }
+        syncLegacyPhaseModelsFromV3(taskMetadata);
       } catch (err) {
-        console.error('[TASK_CREATE] Failed to read V3 model config, continuing without it:', err);
+        console.error('[TASK_CREATE] Failed to sync V3 model config, continuing without it:', err);
         // Continue without V3 config - backend will use defaults
       }
 
@@ -421,6 +443,8 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
 
             updatedMetadata.attachedImages = savedImages;
           }
+
+          syncLegacyPhaseModelsFromV3(updatedMetadata);
 
           // Update task_metadata.json
           const metadataPath = path.join(specDir, 'task_metadata.json');

@@ -1,5 +1,6 @@
 import { ChildProcess } from 'child_process';
-import type { IdeationConfig, ProfileModelPair } from '../../shared/types';
+import type { IdeationConfig, ProfileModelPair, TaskMetadata } from '../../shared/types';
+import type { PhaseModelConfigV3 } from '../../shared/types/settings';
 import type { CompletablePhase } from '../../shared/constants/phase-protocol';
 
 /**
@@ -60,6 +61,7 @@ export interface TaskExecutionOptions {
   workers?: number;
   baseBranch?: string;
   useWorktree?: boolean; // If false, use --direct mode (no worktree isolation)
+  metadata?: TaskMetadata;
 }
 
 export interface SpecCreationMetadata {
@@ -78,6 +80,8 @@ export interface SpecCreationMetadata {
     coding: 'none' | 'low' | 'medium' | 'high' | 'ultrathink';
     qa: 'none' | 'low' | 'medium' | 'high' | 'ultrathink';
   };
+  // V3: Profile + model fallback chains per phase
+  phaseModelsV3?: PhaseModelConfigV3;
   // Non-auto profile - single model and thinking level
   model?: 'haiku' | 'sonnet' | 'opus';
   thinkingLevel?: 'none' | 'low' | 'medium' | 'high' | 'ultrathink';

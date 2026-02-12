@@ -7,35 +7,53 @@ Reads configuration from task_metadata.json and provides resolved model IDs.
 """
 
 import json
+import logging
 import os
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
+
+logger = logging.getLogger(__name__)
 
 # Model shorthand to full model ID mapping
+# Values must match apps/frontend/src/shared/constants/models.ts MODEL_ID_MAP
 MODEL_ID_MAP: dict[str, str] = {
-    "opus": "claude-opus-4-5-20251101",
+    "opus": "claude-opus-4-6",
+    "opus-1m": "claude-opus-4-6",
+    "opus-4.5": "claude-opus-4-5-20251101",
     "sonnet": "claude-sonnet-4-5-20250929",
     "haiku": "claude-haiku-4-5-20251001",
 }
 
-# Thinking level to budget tokens mapping (None = no extended thinking)
-# Values must match auto-claude-ui/src/shared/constants/models.ts THINKING_BUDGET_MAP
-THINKING_BUDGET_MAP: dict[str, int | None] = {
-    "none": None,
+# Model shorthand to required SDK beta headers
+# Maps model shorthands that need special beta flags (e.g., 1M context window)
+MODEL_BETAS_MAP: dict[str, list[str]] = {
+    "opus-1m": ["context-1m-2025-08-07"],
+}
+
+# Thinking level to budget tokens mapping
+# Values must match apps/frontend/src/shared/constants/models.ts THINKING_BUDGET_MAP
+THINKING_BUDGET_MAP: dict[str, int] = {
     "low": 1024,
     "medium": 4096,  # Moderate analysis
     "high": 16384,  # Deep thinking for QA review
-    "ultrathink": 63999,  # Maximum reasoning depth (API requires max_tokens >= budget + 1, so 63999 + 1 = 64000 limit)
 }
 
+# Effort level mapping for adaptive thinking models (e.g., Opus 4.6)
+# These models support CLAUDE_CODE_EFFORT_LEVEL env var for effort-based routing
+EFFORT_LEVEL_MAP: dict[str, str] = {"low": "low", "medium": "medium", "high": "high"}
+
+# Models that support adaptive thinking via effort level (env var)
+# These models get both max_thinking_tokens AND effort_level
+ADAPTIVE_THINKING_MODELS: set[str] = {"claude-opus-4-6"}
+
 # Spec runner phase-specific thinking levels
-# Heavy phases use ultrathink for deep analysis
+# Heavy phases use high for deep analysis
 # Light phases use medium after compaction
 SPEC_PHASE_THINKING_LEVELS: dict[str, str] = {
-    # Heavy phases - ultrathink (discovery, spec creation, self-critique)
-    "discovery": "ultrathink",
-    "spec_writing": "ultrathink",
-    "self_critique": "ultrathink",
+    # Heavy phases - high (discovery, spec creation, self-critique)
+    "discovery": "high",
+    "spec_writing": "high",
+    "self_critique": "high",
     # Light phases - medium (after first invocation with compaction)
     "requirements": "medium",
     "research": "medium",
@@ -77,17 +95,66 @@ class PhaseThinkingConfig(TypedDict, total=False):
     qa: str
 
 
+class PhaseModelPair(TypedDict, total=False):
+    profileId: str
+    model: str
+
+
+class PhaseModelConfigV3(TypedDict, total=False):
+    spec: list[PhaseModelPair]
+    planning: list[PhaseModelPair]
+    coding: list[PhaseModelPair]
+    qa: list[PhaseModelPair]
+
+
+class PhaseProviderEnvEntry(TypedDict, total=False):
+    profileId: str
+    model: str
+    env: dict[str, str]
+
+
+class PhaseProviderEnvConfig(TypedDict, total=False):
+    spec: list[PhaseProviderEnvEntry]
+    planning: list[PhaseProviderEnvEntry]
+    coding: list[PhaseProviderEnvEntry]
+    qa: list[PhaseProviderEnvEntry]
+
+
 class TaskMetadataConfig(TypedDict, total=False):
     """Structure of model-related fields in task_metadata.json"""
 
     isAutoProfile: bool
     phaseModels: PhaseModelConfig
+    phaseModelsV3: PhaseModelConfigV3
     phaseThinking: PhaseThinkingConfig
     model: str
     thinkingLevel: str
+    fastMode: bool
 
 
 Phase = Literal["spec", "planning", "coding", "qa"]
+
+PHASE_PROVIDER_ENV_CONFIG_KEY = "AUTOCLAUDE_PHASE_PROVIDER_ENV_V3"
+PHASE_PROVIDER_AUTH_KEYS = (
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+)
+PHASE_PROVIDER_RESET_KEYS = (
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_KEY",
+)
 
 
 def resolve_model_id(model: str) -> str:
@@ -112,6 +179,9 @@ def resolve_model_id(model: str) -> str:
             "haiku": "ANTHROPIC_DEFAULT_HAIKU_MODEL",
             "sonnet": "ANTHROPIC_DEFAULT_SONNET_MODEL",
             "opus": "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "opus-1m": "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            # opus-4.5 intentionally omitted — always resolves to its hardcoded
+            # model ID (claude-opus-4-5-20251101) regardless of env var overrides.
         }
         env_var = env_var_map.get(model)
         if env_var:
@@ -126,23 +196,69 @@ def resolve_model_id(model: str) -> str:
     return model
 
 
-def get_thinking_budget(thinking_level: str) -> int | None:
+def get_model_betas(model_short: str) -> list[str]:
+    """
+    Get required SDK beta headers for a model shorthand.
+
+    Some model configurations (e.g., opus-1m for 1M context window) require
+    passing beta headers to the Claude Agent SDK.
+
+    Args:
+        model_short: Model shorthand (e.g., 'opus', 'opus-1m', 'sonnet')
+
+    Returns:
+        List of beta header strings, or empty list if none required
+    """
+    return MODEL_BETAS_MAP.get(model_short, [])
+
+
+VALID_THINKING_LEVELS = {"low", "medium", "high"}
+
+# Mapping from legacy/removed thinking levels to valid ones
+LEGACY_THINKING_LEVEL_MAP: dict[str, str] = {
+    "ultrathink": "high",
+    "none": "low",
+}
+
+
+def sanitize_thinking_level(thinking_level: str) -> str:
+    """
+    Validate and sanitize a thinking level string.
+
+    Maps legacy values (e.g., 'ultrathink') to valid equivalents and falls
+    back to 'medium' for completely unknown values. Used by CLI argparse
+    handlers to make the backend resilient to invalid values from the frontend.
+
+    Args:
+        thinking_level: Raw thinking level string from CLI or task_metadata.json
+
+    Returns:
+        A valid thinking level string (low, medium, high)
+    """
+    if thinking_level in VALID_THINKING_LEVELS:
+        return thinking_level
+
+    mapped = LEGACY_THINKING_LEVEL_MAP.get(thinking_level, "medium")
+    logger.warning("Invalid thinking level '%s' mapped to '%s'", thinking_level, mapped)
+    return mapped
+
+
+def get_thinking_budget(thinking_level: str) -> int:
     """
     Get the thinking budget for a thinking level.
 
     Args:
-        thinking_level: Thinking level (none, low, medium, high, ultrathink)
+        thinking_level: Thinking level (low, medium, high)
 
     Returns:
-        Token budget or None for no extended thinking
+        Token budget for extended thinking
     """
-    import logging
-
     if thinking_level not in THINKING_BUDGET_MAP:
         valid_levels = ", ".join(THINKING_BUDGET_MAP.keys())
-        logging.warning(
-            f"Invalid thinking_level '{thinking_level}'. Valid values: {valid_levels}. "
-            f"Defaulting to 'medium'."
+        logger.warning(
+            "Invalid thinking_level '%s'. Valid values: %s. Defaulting to 'medium'.",
+            thinking_level,
+            valid_levels,
         )
         return THINKING_BUDGET_MAP["medium"]
 
@@ -164,10 +280,96 @@ def load_task_metadata(spec_dir: Path) -> TaskMetadataConfig | None:
         return None
 
     try:
-        with open(metadata_path) as f:
+        with open(metadata_path, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
+
+
+def _load_phase_provider_env_config() -> PhaseProviderEnvConfig | None:
+    raw_config = os.environ.get(PHASE_PROVIDER_ENV_CONFIG_KEY, "").strip()
+    if not raw_config:
+        return None
+
+    try:
+        parsed = json.loads(raw_config)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        logger.warning(
+            "Invalid %s JSON config; ignoring per-phase provider override",
+            PHASE_PROVIDER_ENV_CONFIG_KEY,
+        )
+    return None
+
+
+def _entry_has_auth(entry_env: dict[str, Any]) -> bool:
+    for key in PHASE_PROVIDER_AUTH_KEYS:
+        value = entry_env.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
+
+
+def _reset_phase_provider_env() -> None:
+    for key in PHASE_PROVIDER_RESET_KEYS:
+        os.environ.pop(key, None)
+
+
+def apply_phase_provider_env(phase: Phase) -> bool:
+    """
+    Apply per-phase provider env from frontend-generated runtime config.
+
+    Returns:
+        True if a phase-specific provider/model was applied, otherwise False.
+    """
+    config = _load_phase_provider_env_config()
+    if not config:
+        return False
+
+    # Always reset provider-specific env when per-phase config is active.
+    # This prevents prior phase/provider values from leaking into the next phase.
+    _reset_phase_provider_env()
+
+    phase_chain = config.get(phase, [])
+    if not isinstance(phase_chain, list):
+        return False
+
+    selected_model = ""
+    selected_env: dict[str, str] | None = None
+
+    for raw_entry in phase_chain:
+        if not isinstance(raw_entry, dict):
+            continue
+
+        model = raw_entry.get("model")
+        entry_env = raw_entry.get("env")
+
+        if not isinstance(model, str) or not model.strip():
+            continue
+        if not isinstance(entry_env, dict):
+            continue
+        if not _entry_has_auth(entry_env):
+            continue
+
+        selected_model = model.strip()
+        selected_env = {
+            key: value.strip()
+            for key, value in entry_env.items()
+            if isinstance(key, str) and isinstance(value, str) and value.strip()
+        }
+        break
+
+    if not selected_env or not selected_model:
+        return False
+
+    # Apply selected provider credentials/base URL for this phase.
+    for key, value in selected_env.items():
+        os.environ[key] = value
+
+    # Ensure model is phase-specific (important when ANTHROPIC_MODEL was pre-set globally).
+    os.environ["ANTHROPIC_MODEL"] = selected_model
+    return True
 
 
 def get_phase_model(
@@ -193,6 +395,10 @@ def get_phase_model(
     Returns:
         Resolved full model ID
     """
+    # Apply phase-specific provider/model override chain from frontend config.
+    # This enables per-phase provider selection with fallback behavior.
+    apply_phase_provider_env(phase)
+
     # CLI argument takes precedence
     if cli_model:
         return resolve_model_id(cli_model)
@@ -219,6 +425,50 @@ def get_phase_model(
 
     # Fall back to default phase configuration
     return resolve_model_id(DEFAULT_PHASE_MODELS[phase])
+
+
+def get_phase_model_betas(
+    spec_dir: Path,
+    phase: Phase,
+    cli_model: str | None = None,
+) -> list[str]:
+    """
+    Get required SDK beta headers for the model selected for a specific phase.
+
+    Uses the same priority logic as get_phase_model() to determine which model
+    shorthand is selected, then looks up any required beta headers.
+
+    Args:
+        spec_dir: Path to the spec directory
+        phase: Execution phase (spec, planning, coding, qa)
+        cli_model: Model from CLI argument (optional)
+
+    Returns:
+        List of beta header strings, or empty list if none required
+    """
+    # Keep provider/model env in sync with get_phase_model() for this phase.
+    apply_phase_provider_env(phase)
+
+    # Determine the model shorthand (before resolution to full ID)
+    if cli_model:
+        return get_model_betas(cli_model)
+
+    env_model = os.environ.get("ANTHROPIC_MODEL")
+    if env_model:
+        return get_model_betas(env_model)
+
+    metadata = load_task_metadata(spec_dir)
+
+    if metadata:
+        if metadata.get("isAutoProfile") and metadata.get("phaseModels"):
+            phase_models = metadata["phaseModels"]
+            model_short = phase_models.get(phase, DEFAULT_PHASE_MODELS[phase])
+            return get_model_betas(model_short)
+
+        if metadata.get("model"):
+            return get_model_betas(metadata["model"])
+
+    return get_model_betas(DEFAULT_PHASE_MODELS[phase])
 
 
 def get_phase_thinking(
@@ -268,7 +518,7 @@ def get_phase_thinking_budget(
     spec_dir: Path,
     phase: Phase,
     cli_thinking: str | None = None,
-) -> int | None:
+) -> int:
     """
     Get the thinking budget tokens for a specific execution phase.
 
@@ -278,7 +528,7 @@ def get_phase_thinking_budget(
         cli_thinking: Thinking level from CLI argument (optional)
 
     Returns:
-        Token budget or None for no extended thinking
+        Token budget for extended thinking
     """
     thinking_level = get_phase_thinking(spec_dir, phase, cli_thinking)
     return get_thinking_budget(thinking_level)
@@ -289,7 +539,7 @@ def get_phase_config(
     phase: Phase,
     cli_model: str | None = None,
     cli_thinking: str | None = None,
-) -> tuple[str, str, int | None]:
+) -> tuple[str, str, int]:
     """
     Get the full configuration for a specific execution phase.
 
@@ -309,7 +559,95 @@ def get_phase_config(
     return model_id, thinking_level, thinking_budget
 
 
-def get_spec_phase_thinking_budget(phase_name: str) -> int | None:
+def is_adaptive_model(model_id: str) -> bool:
+    """
+    Check if a model supports adaptive thinking via effort level.
+
+    Adaptive models support the CLAUDE_CODE_EFFORT_LEVEL environment variable
+    for effort-based routing in addition to max_thinking_tokens.
+
+    Args:
+        model_id: Full model ID (e.g., 'claude-opus-4-6')
+
+    Returns:
+        True if the model supports adaptive thinking
+    """
+    return model_id in ADAPTIVE_THINKING_MODELS
+
+
+def get_thinking_kwargs_for_model(model_id: str, thinking_level: str) -> dict:
+    """
+    Get thinking-related kwargs for create_client() based on model type.
+
+    For adaptive models (Opus 4.6): returns both max_thinking_tokens and effort_level.
+    For other models (Sonnet, Haiku): returns only max_thinking_tokens.
+
+    Args:
+        model_id: Full model ID (e.g., 'claude-opus-4-6')
+        thinking_level: Thinking level string (low, medium, high)
+
+    Returns:
+        Dict with 'max_thinking_tokens' and optionally 'effort_level'
+    """
+    kwargs: dict = {"max_thinking_tokens": get_thinking_budget(thinking_level)}
+    if is_adaptive_model(model_id):
+        kwargs["effort_level"] = EFFORT_LEVEL_MAP.get(thinking_level, "medium")
+    return kwargs
+
+
+def get_phase_client_thinking_kwargs(
+    spec_dir: Path,
+    phase: Phase,
+    phase_model: str,
+    cli_thinking: str | None = None,
+) -> dict:
+    """
+    Get thinking kwargs for create_client() for a specific execution phase.
+
+    Combines get_phase_thinking() and get_thinking_kwargs_for_model() to produce
+    the correct kwargs dict based on phase config and model capabilities.
+
+    Args:
+        spec_dir: Path to the spec directory
+        phase: Execution phase (spec, planning, coding, qa)
+        phase_model: Resolved full model ID for this phase
+        cli_thinking: Thinking level from CLI argument (optional)
+
+    Returns:
+        Dict with 'max_thinking_tokens' and optionally 'effort_level'
+    """
+    thinking_level = get_phase_thinking(spec_dir, phase, cli_thinking)
+    return get_thinking_kwargs_for_model(phase_model, thinking_level)
+
+
+def get_fast_mode(spec_dir: Path) -> bool:
+    """
+    Check if Fast Mode is enabled for this task.
+
+    Fast Mode provides faster Opus 4.6 output at higher cost.
+    Reads the fastMode flag from task_metadata.json.
+
+    Args:
+        spec_dir: Path to the spec directory
+
+    Returns:
+        True if Fast Mode is enabled, False otherwise
+    """
+    metadata = load_task_metadata(spec_dir)
+    if metadata:
+        enabled = bool(metadata.get("fastMode", False))
+        if enabled:
+            logger.info(
+                "[Fast Mode] ENABLED — read fastMode=true from task_metadata.json"
+            )
+        else:
+            logger.info("[Fast Mode] disabled — fastMode not set in task_metadata.json")
+        return enabled
+    logger.info("[Fast Mode] disabled — no task_metadata.json found")
+    return False
+
+
+def get_spec_phase_thinking_budget(phase_name: str) -> int:
     """
     Get the thinking budget for a specific spec runner phase.
 
@@ -320,7 +658,7 @@ def get_spec_phase_thinking_budget(phase_name: str) -> int | None:
         phase_name: Name of the spec phase (e.g., 'discovery', 'spec_writing')
 
     Returns:
-        Token budget for extended thinking, or None for no extended thinking
+        Token budget for extended thinking
     """
     thinking_level = SPEC_PHASE_THINKING_LEVELS.get(phase_name, "medium")
     return get_thinking_budget(thinking_level)

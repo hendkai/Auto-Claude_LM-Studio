@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, ChevronDown, ChevronUp, RotateCcw, FolderTree, GitBranch, Info } from 'lucide-react';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
-import { Combobox, type ComboboxOption } from './ui/combobox';
+import { Combobox } from './ui/combobox';
 import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
 import { type FileReferenceData } from './task-form/useImageUpload';
@@ -23,14 +23,18 @@ import { TaskFileExplorerDrawer } from './TaskFileExplorerDrawer';
 import { FileAutocomplete } from './FileAutocomplete';
 import { createTask, saveDraft, loadDraft, clearDraft, isDraftEmpty } from '../stores/task-store';
 import { useProjectStore } from '../stores/project-store';
+import { buildBranchOptions } from '../lib/branch-utils';
 import { cn } from '../lib/utils';
-import type { TaskCategory, TaskPriority, TaskComplexity, TaskImpact, TaskMetadata, ImageAttachment, TaskDraft, ModelType, ThinkingLevel, ReferencedFile } from '../../shared/types';
-import type { PhaseModelConfig, PhaseThinkingConfig } from '../../shared/types/settings';
+import type { TaskCategory, TaskPriority, TaskComplexity, TaskImpact, TaskMetadata, ImageAttachment, TaskDraft, ModelType, ThinkingLevel, ReferencedFile, GitBranchDetail } from '../../shared/types';
+import type { PhaseThinkingConfig, PhaseModelConfigV3 } from '../../shared/types/settings';
 import {
   DEFAULT_AGENT_PROFILES,
   DEFAULT_PHASE_MODELS,
-  DEFAULT_PHASE_THINKING
+  DEFAULT_PHASE_THINKING,
+  FAST_MODE_MODELS,
+  PHASE_KEYS
 } from '../../shared/constants';
+import { getCurrentPhaseConfigV3 } from '../../shared/utils/phase-config-migration';
 import { useSettingsStore } from '../stores/settings-store';
 
 interface TaskCreationWizardProps {
@@ -48,7 +52,7 @@ export function TaskCreationWizard({
   onOpenChange
 }: TaskCreationWizardProps) {
   const { t } = useTranslation(['tasks', 'common']);
-  const { settings } = useSettingsStore();
+  const { settings, activeProfileId } = useSettingsStore();
   const selectedProfile = DEFAULT_AGENT_PROFILES.find(
     p => p.id === settings.selectedAgentProfile
   ) || DEFAULT_AGENT_PROFILES.find(p => p.id === 'auto')!;
@@ -62,8 +66,8 @@ export function TaskCreationWizard({
   const [showFileExplorer, setShowFileExplorer] = useState(false);
   const [showGitOptions, setShowGitOptions] = useState(false);
 
-  // Git options state
-  const [branches, setBranches] = useState<string[]>([]);
+  // Git options state - using structured GitBranchDetail for type indicators
+  const [branches, setBranches] = useState<GitBranchDetail[]>([]);
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
   const [baseBranch, setBaseBranch] = useState<string>(PROJECT_DEFAULT_BRANCH);
   const [projectDefaultBranch, setProjectDefaultBranch] = useState<string>('');
@@ -77,21 +81,26 @@ export function TaskCreationWizard({
     return project?.path ?? null;
   }, [projects, projectId]);
 
-  // Convert branches to ComboboxOption[] format for searchable dropdown
-  const branchOptions: ComboboxOption[] = useMemo(() => {
-    const options: ComboboxOption[] = [
-      {
+  // Build branch options using shared utility - groups by local/remote with type indicators
+  const branchOptions = useMemo(() => {
+    return buildBranchOptions(branches, {
+      t,
+      includeProjectDefault: {
         value: PROJECT_DEFAULT_BRANCH,
-        label: projectDefaultBranch
-          ? t('tasks:wizard.gitOptions.useProjectDefaultWithBranch', { branch: projectDefaultBranch })
-          : t('tasks:wizard.gitOptions.useProjectDefault')
-      }
-    ];
-    branches.forEach((branch) => {
-      options.push({ value: branch, label: branch });
+        branchName: projectDefaultBranch,
+        labelKey: projectDefaultBranch
+          ? 'tasks:wizard.gitOptions.useProjectDefaultWithBranch'
+          : 'tasks:wizard.gitOptions.useProjectDefault',
+      },
     });
-    return options;
   }, [branches, projectDefaultBranch, t]);
+
+  // Determine if the selected branch is local (for useLocalBranch flag)
+  const isSelectedBranchLocal = useMemo(() => {
+    if (baseBranch === PROJECT_DEFAULT_BRANCH) return false;
+    const selectedGitBranchDetail = branches.find((b) => b.name === baseBranch);
+    return selectedGitBranchDetail?.type === 'local';
+  }, [baseBranch, branches]);
 
   // Classification fields
   const [category, setCategory] = useState<TaskCategory | ''>('');
@@ -103,8 +112,12 @@ export function TaskCreationWizard({
   const [profileId, setProfileId] = useState<string>(settings.selectedAgentProfile || 'auto');
   const [model, setModel] = useState<ModelType | ''>(selectedProfile.model);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | ''>(selectedProfile.thinkingLevel);
-  const [phaseModels, setPhaseModels] = useState<PhaseModelConfig | undefined>(
-    settings.customPhaseModels || selectedProfile.phaseModels || DEFAULT_PHASE_MODELS
+  const [phaseModelsV3, setPhaseModelsV3] = useState<PhaseModelConfigV3>(() =>
+    getCurrentPhaseConfigV3(
+      settings,
+      selectedProfile.phaseModels || DEFAULT_PHASE_MODELS,
+      activeProfileId || ''
+    )
   );
   const [phaseThinking, setPhaseThinking] = useState<PhaseThinkingConfig | undefined>(
     settings.customPhaseThinking || selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING
@@ -116,6 +129,17 @@ export function TaskCreationWizard({
 
   // Review setting
   const [requireReviewBeforeCoding, setRequireReviewBeforeCoding] = useState(false);
+
+  // Fast mode
+  const [fastMode, setFastMode] = useState(false);
+
+  // Show Fast Mode toggle when any phase uses an Opus model
+  const showFastModeToggle = useMemo(() => {
+    return PHASE_KEYS.some((phase) => {
+      const primaryModel = phaseModelsV3[phase]?.[0]?.model || '';
+      return FAST_MODE_MODELS.includes(primaryModel as any) || primaryModel.toLowerCase().includes('opus');
+    });
+  }, [phaseModelsV3]);
 
   // Draft state
   const [isDraftRestored, setIsDraftRestored] = useState(false);
@@ -150,11 +174,19 @@ export function TaskCreationWizard({
         setProfileId(draft.profileId || settings.selectedAgentProfile || 'auto');
         setModel(draft.model || selectedProfile.model);
         setThinkingLevel(draft.thinkingLevel || selectedProfile.thinkingLevel);
-        setPhaseModels(draft.phaseModels || settings.customPhaseModels || selectedProfile.phaseModels || DEFAULT_PHASE_MODELS);
+        setPhaseModelsV3(
+          draft.phaseModelsV3 ||
+          getCurrentPhaseConfigV3(
+            settings,
+            selectedProfile.phaseModels || DEFAULT_PHASE_MODELS,
+            activeProfileId || ''
+          )
+        );
         setPhaseThinking(draft.phaseThinking || settings.customPhaseThinking || selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING);
         setImages(draft.images);
         setReferencedFiles(draft.referencedFiles ?? []);
         setRequireReviewBeforeCoding(draft.requireReviewBeforeCoding ?? false);
+        setFastMode(draft.fastMode ?? false);
         setIsDraftRestored(true);
 
         if (draft.category || draft.priority || draft.complexity || draft.impact) {
@@ -172,11 +204,18 @@ export function TaskCreationWizard({
         setProfileId(settings.selectedAgentProfile || 'auto');
         setModel(selectedProfile.model);
         setThinkingLevel(selectedProfile.thinkingLevel);
-        setPhaseModels(settings.customPhaseModels || selectedProfile.phaseModels || DEFAULT_PHASE_MODELS);
+        setPhaseModelsV3(
+          getCurrentPhaseConfigV3(
+            settings,
+            selectedProfile.phaseModels || DEFAULT_PHASE_MODELS,
+            activeProfileId || ''
+          )
+        );
         setPhaseThinking(settings.customPhaseThinking || selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING);
         setImages([]);
         setReferencedFiles([]);
         setRequireReviewBeforeCoding(false);
+        setFastMode(false);
         setBaseBranch(PROJECT_DEFAULT_BRANCH);
         setUseWorktree(true);
         setIsDraftRestored(false);
@@ -185,9 +224,9 @@ export function TaskCreationWizard({
         setShowGitOptions(false);
       }
     }
-  }, [open, projectId, settings.selectedAgentProfile, settings.customPhaseModels, settings.customPhaseThinking, selectedProfile.model, selectedProfile.thinkingLevel, selectedProfile.phaseModels, selectedProfile.phaseThinking]);
+  }, [open, projectId, settings.selectedAgentProfile, settings.customPhaseModels, settings.customPhaseModelsV3, settings.customPhaseThinking, selectedProfile.model, selectedProfile.thinkingLevel, selectedProfile.phaseModels, selectedProfile.phaseThinking, activeProfileId]);
 
-  // Fetch branches when dialog opens
+  // Fetch branches when dialog opens - using structured branch data with type indicators
   useEffect(() => {
     let isMounted = true;
 
@@ -195,7 +234,8 @@ export function TaskCreationWizard({
       if (!projectPath) return;
       if (isMounted) setIsLoadingBranches(true);
       try {
-        const result = await window.electronAPI.getGitBranches(projectPath);
+        // Use structured branch data with type indicators
+        const result = await window.electronAPI.getGitBranchesWithInfo(projectPath);
         if (isMounted && result.success && result.data) {
           setBranches(result.data);
         }
@@ -247,13 +287,14 @@ export function TaskCreationWizard({
     profileId,
     model,
     thinkingLevel,
-    phaseModels,
+    phaseModelsV3,
     phaseThinking,
     images,
     referencedFiles,
     requireReviewBeforeCoding,
+    fastMode,
     savedAt: new Date()
-  }), [projectId, title, description, category, priority, complexity, impact, profileId, model, thinkingLevel, phaseModels, phaseThinking, images, referencedFiles, requireReviewBeforeCoding]);
+  }), [projectId, title, description, category, priority, complexity, impact, profileId, model, thinkingLevel, phaseModelsV3, phaseThinking, images, referencedFiles, requireReviewBeforeCoding, fastMode]);
 
   /**
    * Detect @ mention being typed and show autocomplete
@@ -414,9 +455,9 @@ export function TaskCreationWizard({
       if (impact) metadata.impact = impact;
       if (model) metadata.model = model;
       if (thinkingLevel) metadata.thinkingLevel = thinkingLevel;
-      if (phaseModels && phaseThinking) {
+      if (phaseThinking) {
         metadata.isAutoProfile = profileId === 'auto';
-        metadata.phaseModels = phaseModels;
+        metadata.phaseModelsV3 = phaseModelsV3;
         metadata.phaseThinking = phaseThinking;
       }
       if (images.length > 0) metadata.attachedImages = images;
@@ -432,6 +473,10 @@ export function TaskCreationWizard({
       }
       // Pass worktree preference - false means use --direct mode
       if (!useWorktree) metadata.useWorktree = false;
+      // Set useLocalBranch when user explicitly selects a local branch
+      // This preserves gitignored files (.env, configs) by not switching to origin
+      if (isSelectedBranchLocal) metadata.useLocalBranch = true;
+      metadata.fastMode = fastMode;
 
       const task = await createTask(projectId, title.trim(), description.trim(), metadata);
       if (task) {
@@ -458,11 +503,18 @@ export function TaskCreationWizard({
     setProfileId(settings.selectedAgentProfile || 'auto');
     setModel(selectedProfile.model);
     setThinkingLevel(selectedProfile.thinkingLevel);
-    setPhaseModels(settings.customPhaseModels || selectedProfile.phaseModels || DEFAULT_PHASE_MODELS);
+    setPhaseModelsV3(
+      getCurrentPhaseConfigV3(
+        settings,
+        selectedProfile.phaseModels || DEFAULT_PHASE_MODELS,
+        activeProfileId || ''
+      )
+    );
     setPhaseThinking(settings.customPhaseThinking || selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING);
     setImages([]);
     setReferencedFiles([]);
     setRequireReviewBeforeCoding(false);
+    setFastMode(false);
     setBaseBranch(PROJECT_DEFAULT_BRANCH);
     setUseWorktree(true);
     setError(null);
@@ -620,7 +672,7 @@ export function TaskCreationWizard({
           profileId={profileId}
           model={model}
           thinkingLevel={thinkingLevel}
-          phaseModels={phaseModels}
+          phaseModelsV3={phaseModelsV3}
           phaseThinking={phaseThinking}
           onProfileChange={(newProfileId, newModel, newThinkingLevel) => {
             setProfileId(newProfileId);
@@ -629,7 +681,7 @@ export function TaskCreationWizard({
           }}
           onModelChange={setModel}
           onThinkingLevelChange={setThinkingLevel}
-          onPhaseModelsChange={setPhaseModels}
+          onPhaseModelsV3Change={setPhaseModelsV3}
           onPhaseThinkingChange={setPhaseThinking}
           category={category}
           priority={priority}
@@ -645,6 +697,9 @@ export function TaskCreationWizard({
           onImagesChange={setImages}
           requireReviewBeforeCoding={requireReviewBeforeCoding}
           onRequireReviewChange={setRequireReviewBeforeCoding}
+          fastMode={fastMode}
+          onFastModeChange={setFastMode}
+          showFastModeToggle={showFastModeToggle}
           disabled={isCreating}
           error={error}
           onError={setError}

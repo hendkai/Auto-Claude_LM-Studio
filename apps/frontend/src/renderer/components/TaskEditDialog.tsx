@@ -26,7 +26,7 @@
  * />
  * ```
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
@@ -34,13 +34,17 @@ import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
 import { type FileReferenceData } from './task-form/useImageUpload';
 import { persistUpdateTask } from '../stores/task-store';
+import { useProjectStore } from '../stores/project-store';
 import type { Task, ImageAttachment, TaskCategory, TaskPriority, TaskComplexity, TaskImpact, ModelType, ThinkingLevel } from '../../shared/types';
 import {
   DEFAULT_AGENT_PROFILES,
   DEFAULT_PHASE_MODELS,
-  DEFAULT_PHASE_THINKING
+  DEFAULT_PHASE_THINKING,
+  FAST_MODE_MODELS,
+  PHASE_KEYS
 } from '../../shared/constants';
-import type { PhaseModelConfig, PhaseThinkingConfig } from '../../shared/types/settings';
+import type { PhaseThinkingConfig, PhaseModelConfigV3 } from '../../shared/types/settings';
+import { getCurrentPhaseConfigV3 } from '../../shared/utils/phase-config-migration';
 import { useSettingsStore } from '../stores/settings-store';
 
 /**
@@ -60,10 +64,17 @@ interface TaskEditDialogProps {
 export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDialogProps) {
   const { t } = useTranslation(['tasks', 'common']);
   // Get selected agent profile from settings for defaults
-  const { settings } = useSettingsStore();
+  const { settings, activeProfileId } = useSettingsStore();
   const selectedProfile = DEFAULT_AGENT_PROFILES.find(
     p => p.id === settings.selectedAgentProfile
   ) || DEFAULT_AGENT_PROFILES.find(p => p.id === 'auto')!;
+
+  // Get project path for loading image thumbnails from disk
+  const projects = useProjectStore((state) => state.projects);
+  const projectPath = useMemo(() => {
+    const project = projects.find(p => p.id === task.projectId);
+    return project?.path;
+  }, [projects, task.projectId]);
 
   // Form state
   const [title, setTitle] = useState(task.title);
@@ -97,8 +108,12 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | ''>(
     task.metadata?.thinkingLevel || selectedProfile.thinkingLevel
   );
-  const [phaseModels, setPhaseModels] = useState<PhaseModelConfig | undefined>(
-    task.metadata?.phaseModels || selectedProfile.phaseModels || DEFAULT_PHASE_MODELS
+  const [phaseModelsV3, setPhaseModelsV3] = useState<PhaseModelConfigV3>(() =>
+    task.metadata?.phaseModelsV3 || getCurrentPhaseConfigV3(
+      settings,
+      selectedProfile.phaseModels || DEFAULT_PHASE_MODELS,
+      activeProfileId || ''
+    )
   );
   const [phaseThinking, setPhaseThinking] = useState<PhaseThinkingConfig | undefined>(
     task.metadata?.phaseThinking || selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING
@@ -111,6 +126,20 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
   const [requireReviewBeforeCoding, setRequireReviewBeforeCoding] = useState(
     task.metadata?.requireReviewBeforeCoding ?? false
   );
+
+  // Fast mode
+  const [fastMode, setFastMode] = useState(task.metadata?.fastMode ?? false);
+
+  // Show Fast Mode toggle when any phase uses an Opus model
+  const showFastModeToggle = useMemo(() => {
+    return PHASE_KEYS.some((phase) => {
+      const primaryModel = phaseModelsV3[phase]?.[0]?.model || '';
+      return FAST_MODE_MODELS.includes(primaryModel as any) || primaryModel.toLowerCase().includes('opus');
+    });
+  }, [phaseModelsV3]);
+
+  // Disable fast mode toggle for tasks that have moved past backlog
+  const isFastModeEditable = task.status === 'backlog';
 
   // Reset form when task changes or dialog opens
   useEffect(() => {
@@ -131,7 +160,13 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         setProfileId('auto');
         setModel(taskModel || selectedProfile.model);
         setThinkingLevel(taskThinking || selectedProfile.thinkingLevel);
-        setPhaseModels(task.metadata?.phaseModels || DEFAULT_PHASE_MODELS);
+        setPhaseModelsV3(
+          task.metadata?.phaseModelsV3 || getCurrentPhaseConfigV3(
+            settings,
+            selectedProfile.phaseModels || DEFAULT_PHASE_MODELS,
+            activeProfileId || ''
+          )
+        );
         setPhaseThinking(task.metadata?.phaseThinking || DEFAULT_PHASE_THINKING);
       } else if (taskModel && taskThinking) {
         const matchingProfile = DEFAULT_AGENT_PROFILES.find(
@@ -140,18 +175,31 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         setProfileId(matchingProfile?.id || 'custom');
         setModel(taskModel);
         setThinkingLevel(taskThinking);
-        setPhaseModels(task.metadata?.phaseModels || DEFAULT_PHASE_MODELS);
+        setPhaseModelsV3(
+          task.metadata?.phaseModelsV3 || getCurrentPhaseConfigV3(
+            settings,
+            selectedProfile.phaseModels || DEFAULT_PHASE_MODELS,
+            activeProfileId || ''
+          )
+        );
         setPhaseThinking(task.metadata?.phaseThinking || DEFAULT_PHASE_THINKING);
       } else {
         setProfileId(settings.selectedAgentProfile || 'auto');
         setModel(selectedProfile.model);
         setThinkingLevel(selectedProfile.thinkingLevel);
-        setPhaseModels(selectedProfile.phaseModels || DEFAULT_PHASE_MODELS);
+        setPhaseModelsV3(
+          getCurrentPhaseConfigV3(
+            settings,
+            selectedProfile.phaseModels || DEFAULT_PHASE_MODELS,
+            activeProfileId || ''
+          )
+        );
         setPhaseThinking(selectedProfile.phaseThinking || DEFAULT_PHASE_THINKING);
       }
 
       setImages(task.metadata?.attachedImages || []);
       setRequireReviewBeforeCoding(task.metadata?.requireReviewBeforeCoding ?? false);
+      setFastMode(task.metadata?.fastMode ?? false);
       setError(null);
 
       // Auto-expand classification if it has content
@@ -161,7 +209,7 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         setShowClassification(false);
       }
     }
-  }, [open, task, settings.selectedAgentProfile, selectedProfile.model, selectedProfile.thinkingLevel, selectedProfile.phaseModels, selectedProfile.phaseThinking]);
+  }, [open, task, settings.selectedAgentProfile, settings.customPhaseModels, settings.customPhaseModelsV3, selectedProfile.model, selectedProfile.thinkingLevel, selectedProfile.phaseModels, selectedProfile.phaseThinking, activeProfileId]);
 
   /**
    * Handle file reference drop from FileTreeItem drag
@@ -196,8 +244,13 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       model !== (task.metadata?.model || '') ||
       thinkingLevel !== (task.metadata?.thinkingLevel || '') ||
       requireReviewBeforeCoding !== (task.metadata?.requireReviewBeforeCoding ?? false) ||
+      fastMode !== (task.metadata?.fastMode ?? false) ||
       JSON.stringify(images) !== JSON.stringify(task.metadata?.attachedImages || []) ||
-      JSON.stringify(phaseModels) !== JSON.stringify(task.metadata?.phaseModels || DEFAULT_PHASE_MODELS) ||
+      JSON.stringify(phaseModelsV3) !== JSON.stringify(task.metadata?.phaseModelsV3 || getCurrentPhaseConfigV3(
+        settings,
+        selectedProfile.phaseModels || DEFAULT_PHASE_MODELS,
+        activeProfileId || ''
+      )) ||
       JSON.stringify(phaseThinking) !== JSON.stringify(task.metadata?.phaseThinking || DEFAULT_PHASE_THINKING);
 
     if (!hasChanges) {
@@ -216,14 +269,15 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
     if (impact) metadataUpdates.impact = impact;
     if (model) metadataUpdates.model = model as ModelType;
     if (thinkingLevel) metadataUpdates.thinkingLevel = thinkingLevel as ThinkingLevel;
-    if (phaseModels && phaseThinking) {
+    if (phaseThinking) {
       metadataUpdates.isAutoProfile = profileId === 'auto';
-      metadataUpdates.phaseModels = phaseModels;
+      metadataUpdates.phaseModelsV3 = phaseModelsV3;
       metadataUpdates.phaseThinking = phaseThinking;
     }
     // Always set attachedImages to persist removal when all images are deleted
     metadataUpdates.attachedImages = images.length > 0 ? images : [];
     metadataUpdates.requireReviewBeforeCoding = requireReviewBeforeCoding;
+    metadataUpdates.fastMode = fastMode;
 
     const success = await persistUpdateTask(task.id, {
       title: trimmedTitle,
@@ -269,6 +323,8 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       }
     >
       <TaskFormFields
+        projectPath={projectPath}
+        specId={task.specId}
         description={description}
         onDescriptionChange={setDescription}
         title={title}
@@ -276,7 +332,7 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         profileId={profileId}
         model={model}
         thinkingLevel={thinkingLevel}
-        phaseModels={phaseModels}
+        phaseModelsV3={phaseModelsV3}
         phaseThinking={phaseThinking}
         onProfileChange={(newProfileId, newModel, newThinkingLevel) => {
           setProfileId(newProfileId);
@@ -285,7 +341,7 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         }}
         onModelChange={setModel}
         onThinkingLevelChange={setThinkingLevel}
-        onPhaseModelsChange={setPhaseModels}
+        onPhaseModelsV3Change={setPhaseModelsV3}
         onPhaseThinkingChange={setPhaseThinking}
         category={category}
         priority={priority}
@@ -301,6 +357,9 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         onImagesChange={setImages}
         requireReviewBeforeCoding={requireReviewBeforeCoding}
         onRequireReviewChange={setRequireReviewBeforeCoding}
+        fastMode={fastMode}
+        onFastModeChange={setFastMode}
+        showFastModeToggle={showFastModeToggle && isFastModeEditable}
         disabled={isSaving}
         error={error}
         onError={setError}

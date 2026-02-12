@@ -64,11 +64,20 @@
     "addButton": "Add Profile",
     "presets": {
       "anthropic": "Anthropic",
+      "openai": "OpenAI",
+      "codex": "Codex (OpenAI)",
+      "kimi": "Kimi (Moonshot)",
       "openrouter": "OpenRouter",
       "groq": "Groq",
       "glmGlobal": "GLM (Global)",
       "glmChina": "GLM (China)",
-      "lmStudio": "LM Studio"
+      "deepseek": "DeepSeek",
+      "perplexity": "Perplexity",
+      "together": "Together AI",
+      "opencode": "OpenCode",
+      "lmStudio": "LM Studio",
+      "ollama": "Ollama",
+      "litellm": "LiteLLM"
     },
     "fields": {
       "name": "Name",

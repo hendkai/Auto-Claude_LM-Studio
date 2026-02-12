@@ -6,12 +6,13 @@ import { AgentEvents } from './agent-events';
 import { AgentProcessManager } from './agent-process';
 import { AgentQueueManager } from './agent-queue';
 import { getClaudeProfileManager, initializeClaudeProfileManager } from '../claude-profile-manager';
+import { buildPhaseProviderEnvConfig, hasProviderAuthInConfig } from '../services/profile/profile-env-utils';
 import {
   SpecCreationMetadata,
   TaskExecutionOptions,
   RoadmapConfig
 } from './types';
-import type { IdeationConfig } from '../../shared/types';
+import type { IdeationConfig, TaskMetadata } from '../../shared/types';
 
 /**
  * Main AgentManager - orchestrates agent process lifecycle
@@ -39,6 +40,32 @@ export class AgentManager extends EventEmitter {
 
   // Track tasks currently starting up to prevent double-start race conditions
   private startingTasks: Set<string> = new Set();
+
+  private async buildPhaseProviderRuntimeEnv(
+    metadata?: SpecCreationMetadata | TaskMetadata
+  ): Promise<{ env: Record<string, string>; hasProviderAuth: boolean }> {
+    const phaseModelsV3 = (metadata as { phaseModelsV3?: unknown } | undefined)?.phaseModelsV3;
+    if (!phaseModelsV3 || typeof phaseModelsV3 !== 'object') {
+      return { env: {}, hasProviderAuth: false };
+    }
+
+    try {
+      const config = await buildPhaseProviderEnvConfig(phaseModelsV3 as any);
+      if (!config) {
+        return { env: {}, hasProviderAuth: false };
+      }
+
+      return {
+        env: {
+          AUTOCLAUDE_PHASE_PROVIDER_ENV_V3: JSON.stringify(config)
+        },
+        hasProviderAuth: hasProviderAuthInConfig(config)
+      };
+    } catch (error) {
+      console.warn('[AgentManager] Failed to build phase provider runtime env:', error);
+      return { env: {}, hasProviderAuth: false };
+    }
+  }
 
   constructor() {
     super();
@@ -117,8 +144,9 @@ export class AgentManager extends EventEmitter {
       this.emit('error', taskId, 'Failed to initialize profile manager. Please check file permissions and disk space.');
       return;
     }
-    if (!profileManager.hasValidAuth()) {
-      this.emit('error', taskId, 'Claude authentication required. Please authenticate in Settings > Claude Profiles before starting tasks.');
+    const phaseProviderRuntime = await this.buildPhaseProviderRuntimeEnv(metadata);
+    if (!profileManager.hasValidAuth() && !phaseProviderRuntime.hasProviderAuth) {
+      this.emit('error', taskId, 'Authentication required. Configure Claude OAuth or a phase provider with API credentials before starting tasks.');
       return;
     }
     this.startingTasks.add(taskId);
@@ -147,6 +175,7 @@ export class AgentManager extends EventEmitter {
 
       // Get combined environment variables
       const combinedEnv = this.processManager.getCombinedEnv(projectPath);
+      const runtimeEnv = { ...combinedEnv, ...phaseProviderRuntime.env };
 
       // spec_runner.py will auto-start run.py after spec creation completes
       const args = [specRunnerPath, '--task', taskDescription, '--project-dir', projectPath];
@@ -190,7 +219,7 @@ export class AgentManager extends EventEmitter {
       this.storeTaskContext(taskId, projectPath, '', {}, true, taskDescription, specDir, metadata, baseBranch);
 
       // Note: This is spec-creation but it chains to task-execution via run.py
-      await this.processManager.spawnProcess(taskId, autoBuildSource, args, combinedEnv, 'task-execution');
+      await this.processManager.spawnProcess(taskId, autoBuildSource, args, runtimeEnv, 'task-execution');
     } finally {
       this.startingTasks.delete(taskId);
     }
@@ -221,8 +250,9 @@ export class AgentManager extends EventEmitter {
       this.emit('error', taskId, 'Failed to initialize profile manager. Please check file permissions and disk space.');
       return;
     }
-    if (!profileManager.hasValidAuth()) {
-      this.emit('error', taskId, 'Claude authentication required. Please authenticate in Settings > Claude Profiles before starting tasks.');
+    const phaseProviderRuntime = await this.buildPhaseProviderRuntimeEnv(options.metadata);
+    if (!profileManager.hasValidAuth() && !phaseProviderRuntime.hasProviderAuth) {
+      this.emit('error', taskId, 'Authentication required. Configure Claude OAuth or a phase provider with API credentials before starting tasks.');
       return;
     }
     this.startingTasks.add(taskId);
@@ -251,6 +281,7 @@ export class AgentManager extends EventEmitter {
 
       // Get combined environment variables
       const combinedEnv = this.processManager.getCombinedEnv(projectPath);
+      const runtimeEnv = { ...combinedEnv, ...phaseProviderRuntime.env };
 
       const args = [runPath, '--spec', specId, '--project-dir', projectPath];
 
@@ -278,7 +309,7 @@ export class AgentManager extends EventEmitter {
       // Store context for potential restart
       this.storeTaskContext(taskId, projectPath, specId, options, false);
 
-      await this.processManager.spawnProcess(taskId, autoBuildSource, args, combinedEnv, 'task-execution');
+      await this.processManager.spawnProcess(taskId, autoBuildSource, args, runtimeEnv, 'task-execution');
     } finally {
       this.startingTasks.delete(taskId);
     }
@@ -290,7 +321,8 @@ export class AgentManager extends EventEmitter {
   async startQAProcess(
     taskId: string,
     projectPath: string,
-    specId: string
+    specId: string,
+    metadata?: TaskMetadata
   ): Promise<void> {
     // Ensure Python environment is ready before spawning process (prevents exit code 127 race condition)
     const pythonStatus = await this.processManager.ensurePythonEnvReady('AgentManager');
@@ -315,10 +347,12 @@ export class AgentManager extends EventEmitter {
 
     // Get combined environment variables
     const combinedEnv = this.processManager.getCombinedEnv(projectPath);
+    const phaseProviderRuntime = await this.buildPhaseProviderRuntimeEnv(metadata);
+    const runtimeEnv = { ...combinedEnv, ...phaseProviderRuntime.env };
 
     const args = [runPath, '--spec', specId, '--project-dir', projectPath, '--qa'];
 
-    await this.processManager.spawnProcess(taskId, autoBuildSource, args, combinedEnv, 'qa-process');
+    await this.processManager.spawnProcess(taskId, autoBuildSource, args, runtimeEnv, 'qa-process');
   }
 
   /**

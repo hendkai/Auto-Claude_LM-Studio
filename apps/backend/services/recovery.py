@@ -86,7 +86,7 @@ class RecoveryManager:
                 "last_updated": datetime.now().isoformat(),
             },
         }
-        with open(self.attempt_history_file, "w") as f:
+        with open(self.attempt_history_file, "w", encoding="utf-8") as f:
             json.dump(initial_data, f, indent=2)
 
     def _init_build_commits(self) -> None:
@@ -99,39 +99,39 @@ class RecoveryManager:
                 "last_updated": datetime.now().isoformat(),
             },
         }
-        with open(self.build_commits_file, "w") as f:
+        with open(self.build_commits_file, "w", encoding="utf-8") as f:
             json.dump(initial_data, f, indent=2)
 
     def _load_attempt_history(self) -> dict:
         """Load attempt history from JSON file."""
         try:
-            with open(self.attempt_history_file) as f:
+            with open(self.attempt_history_file, encoding="utf-8") as f:
                 return json.load(f)
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             self._init_attempt_history()
-            with open(self.attempt_history_file) as f:
+            with open(self.attempt_history_file, encoding="utf-8") as f:
                 return json.load(f)
 
     def _save_attempt_history(self, data: dict) -> None:
         """Save attempt history to JSON file."""
         data["metadata"]["last_updated"] = datetime.now().isoformat()
-        with open(self.attempt_history_file, "w") as f:
+        with open(self.attempt_history_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
     def _load_build_commits(self) -> dict:
         """Load build commits from JSON file."""
         try:
-            with open(self.build_commits_file) as f:
+            with open(self.build_commits_file, encoding="utf-8") as f:
                 return json.load(f)
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             self._init_build_commits()
-            with open(self.build_commits_file) as f:
+            with open(self.build_commits_file, encoding="utf-8") as f:
                 return json.load(f)
 
     def _save_build_commits(self, data: dict) -> None:
         """Save build commits to JSON file."""
         data["metadata"]["last_updated"] = datetime.now().isoformat()
-        with open(self.build_commits_file, "w") as f:
+        with open(self.build_commits_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
     def classify_failure(self, error: str, subtask_id: str) -> FailureType:
@@ -604,3 +604,28 @@ def get_recovery_context(spec_dir: Path, project_dir: Path, subtask_id: str) -> 
         "subtask_history": manager.get_subtask_history(subtask_id),
         "stuck_subtasks": manager.get_stuck_subtasks(),
     }
+
+
+def reset_subtask(spec_dir: Path, project_dir: Path, subtask_id: str) -> None:
+    """
+    Reset a subtask's attempt history (module-level wrapper).
+
+    Args:
+        spec_dir: Spec directory
+        project_dir: Project directory
+        subtask_id: Subtask ID to reset
+    """
+    manager = RecoveryManager(spec_dir, project_dir)
+    manager.reset_subtask(subtask_id)
+
+
+def clear_stuck_subtasks(spec_dir: Path, project_dir: Path) -> None:
+    """
+    Clear all stuck subtasks (module-level wrapper).
+
+    Args:
+        spec_dir: Spec directory
+        project_dir: Project directory
+    """
+    manager = RecoveryManager(spec_dir, project_dir)
+    manager.clear_stuck_subtasks()

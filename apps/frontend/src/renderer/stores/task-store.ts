@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import { arrayMove } from '@dnd-kit/sortable';
 import type { Task, TaskStatus, SubtaskStatus, ImplementationPlan, Subtask, TaskMetadata, ExecutionProgress, ExecutionPhase, ReviewReason, TaskDraft, ImageAttachment, TaskOrderState } from '../../shared/types';
-import { debugLog } from '../../shared/utils/debug-logger';
-import { isTerminalPhase } from '../../shared/constants/phase-protocol';
+import { debugLog, debugWarn } from '../../shared/utils/debug-logger';
+import { useProjectStore } from './project-store';
+
+/** Default max parallel tasks when no project setting is configured */
+export const DEFAULT_MAX_PARALLEL_TASKS = 3;
 
 interface TaskState {
   tasks: Task[];
@@ -15,7 +18,7 @@ interface TaskState {
   setTasks: (tasks: Task[]) => void;
   addTask: (task: Task) => void;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
-  updateTaskStatus: (taskId: string, status: TaskStatus) => void;
+  updateTaskStatus: (taskId: string, status: TaskStatus, reviewReason?: ReviewReason) => void;
   updateTaskFromPlan: (taskId: string, plan: ImplementationPlan) => void;
   updateExecutionProgress: (taskId: string, progress: Partial<ExecutionProgress>) => void;
   appendLog: (taskId: string, log: string) => void;
@@ -32,6 +35,9 @@ interface TaskState {
   saveTaskOrder: (projectId: string) => boolean;
   clearTaskOrder: (projectId: string) => void;
 
+  // Task status change listeners (for queue auto-promotion)
+  registerTaskStatusChangeListener: (listener: (taskId: string, oldStatus: TaskStatus | undefined, newStatus: TaskStatus) => void) => () => void;
+
   // Selectors
   getSelectedTask: () => Task | undefined;
   getTasksByStatus: (status: TaskStatus) => Task[];
@@ -43,6 +49,58 @@ interface TaskState {
  */
 function findTaskIndex(tasks: Task[], taskId: string): number {
   return tasks.findIndex((t) => t.id === taskId || t.specId === taskId);
+}
+
+/**
+ * Task status change listeners for queue auto-promotion
+ * Stored outside the store to avoid triggering re-renders
+ */
+const taskStatusChangeListeners = new Set<(taskId: string, oldStatus: TaskStatus | undefined, newStatus: TaskStatus) => void>();
+
+/**
+ * Track last activity timestamp per task for stuck detection.
+ * If we've received activity (execution progress, status update) within a threshold,
+ * the task is considered active even if the process check fails.
+ * This prevents race conditions where stuck detection fires before process is registered.
+ */
+const taskLastActivity = new Map<string, number>();
+const STUCK_ACTIVITY_THRESHOLD_MS = 60_000; // 60 seconds — matches catastrophic stuck check interval
+
+/**
+ * Record activity for a task (call this when we receive execution progress or status updates)
+ */
+export function recordTaskActivity(taskId: string): void {
+  taskLastActivity.set(taskId, Date.now());
+}
+
+/**
+ * Check if a task has had recent activity within the threshold.
+ * Used by stuck detection to avoid false positives.
+ */
+export function hasRecentActivity(taskId: string): boolean {
+  const lastActivity = taskLastActivity.get(taskId);
+  if (!lastActivity) return false;
+  return Date.now() - lastActivity < STUCK_ACTIVITY_THRESHOLD_MS;
+}
+
+/**
+ * Clear activity tracking for a task (call when task completes or is deleted)
+ */
+export function clearTaskActivity(taskId: string): void {
+  taskLastActivity.delete(taskId);
+}
+
+/**
+ * Notify all registered listeners when a task status changes
+ */
+function notifyTaskStatusChange(taskId: string, oldStatus: TaskStatus | undefined, newStatus: TaskStatus): void {
+  for (const listener of taskStatusChangeListeners) {
+    try {
+      listener(taskId, oldStatus, newStatus);
+    } catch (error) {
+      console.error('[TaskStore] Error in task status change listener:', error);
+    }
+  }
 }
 
 /**
@@ -120,11 +178,13 @@ function getTaskOrderKey(projectId: string): string {
 function createEmptyTaskOrder(): TaskOrderState {
   return {
     backlog: [],
+    queue: [],
     in_progress: [],
     ai_review: [],
     human_review: [],
+    done: [],
     pr_created: [],
-    done: []
+    error: []
   };
 }
 
@@ -135,7 +195,30 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   error: null,
   taskOrder: null,
 
-  setTasks: (tasks) => set({ tasks }),
+  setTasks: (tasks) => {
+    debugLog('[TaskStore.setTasks] Hydrating tasks:', {
+      count: tasks.length,
+      taskIds: tasks.map(t => ({
+        id: t.id,
+        status: t.status,
+        logCount: t.logs?.length || 0,
+        hasExecutionProgress: !!t.executionProgress,
+        phase: t.executionProgress?.phase
+      }))
+    });
+
+    // Log detailed info for each task with logs
+    tasks.forEach(task => {
+      if (task.logs && task.logs.length > 0) {
+        debugLog(`[TaskStore.setTasks] Task ${task.id} has ${task.logs.length} logs:`, {
+          firstLogPreview: task.logs[0]?.substring(0, 100),
+          lastLogPreview: task.logs[task.logs.length - 1]?.substring(0, 100)
+        });
+      }
+    });
+
+    return set({ tasks });
+  },
 
   addTask: (task) =>
     set((state) => {
@@ -177,15 +260,43 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       };
     }),
 
-  updateTaskStatus: (taskId, status) =>
-    set((state) => {
-      const index = findTaskIndex(state.tasks, taskId);
-      if (index === -1) return state;
+  updateTaskStatus: (taskId, status, reviewReason) => {
+    // Record activity for stuck detection — status changes prove the task is alive
+    recordTaskActivity(taskId);
 
+    // Capture old status before update
+    const state = get();
+    const index = findTaskIndex(state.tasks, taskId);
+    if (index === -1) {
+      debugLog('[updateTaskStatus] Task not found:', taskId);
+      return;
+    }
+    const oldTask = state.tasks[index];
+    const oldStatus = oldTask.status;
+
+    // Skip if status AND reviewReason are the same
+    if (oldStatus === status && oldTask.reviewReason === reviewReason) {
+      debugLog('[updateTaskStatus] Status and reviewReason unchanged, skipping:', { taskId, status, reviewReason });
+      return;
+    }
+
+    debugLog('[updateTaskStatus] START:', {
+      taskId,
+      oldStatus,
+      newStatus: status,
+      allInProgress: state.tasks.filter(t => t.status === 'in_progress' && !t.metadata?.archivedAt).map(t => t.id)
+    });
+
+    // Perform the state update
+    set((state) => {
       return {
         tasks: updateTaskAtIndex(state.tasks, index, (t) => {
           // Determine execution progress based on status transition
           let executionProgress = t.executionProgress;
+
+          // Track status transition for debugging flip-flop issues
+          const previousStatus = t.status;
+          const statusChanged = previousStatus !== status;
 
           if (status === 'backlog') {
             // When status goes to backlog, reset execution progress to idle
@@ -197,10 +308,26 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             executionProgress = { phase: 'planning' as ExecutionPhase, phaseProgress: 0, overallProgress: 0 };
           }
 
-          return { ...t, status, executionProgress, updatedAt: new Date() };
+          // Log status transitions to help diagnose flip-flop issues
+          debugLog('[updateTaskStatus] Status transition:', {
+            taskId,
+            previousStatus,
+            newStatus: status,
+            statusChanged,
+            currentPhase: t.executionProgress?.phase,
+            newPhase: executionProgress?.phase
+          });
+
+          return { ...t, status, reviewReason, executionProgress, updatedAt: new Date() };
         })
       };
-    }),
+    });
+
+    // Notify listeners after state update (schedule after current tick)
+    queueMicrotask(() => {
+      notifyTaskStatusChange(taskId, oldStatus, status);
+    });
+  },
 
   updateTaskFromPlan: (taskId, plan) =>
     set((state) => {
@@ -263,125 +390,26 @@ export const useTaskStore = create<TaskState>((set, get) => ({
             }))
           });
 
-          const allCompleted = subtasks.every((s) => s.status === 'completed');
-          const anyFailed = subtasks.some((s) => s.status === 'failed');
-          const anyInProgress = subtasks.some((s) => s.status === 'in_progress');
-          const anyCompleted = subtasks.some((s) => s.status === 'completed');
-
-          let status: TaskStatus = t.status;
-          let reviewReason: ReviewReason | undefined = t.reviewReason;
-
-          // RACE CONDITION FIX: Don't let stale plan data override status during active execution
-          const activePhases: ExecutionPhase[] = ['planning', 'coding', 'qa_review', 'qa_fixing'];
-          const isInActivePhase = t.executionProgress?.phase && activePhases.includes(t.executionProgress.phase);
-
-          // FIX (Flip-Flop Bug): Terminal phases should NOT trigger status recalculation
-          // When phase is 'complete' or 'failed', the task has finished and status should be stable
-          const isInTerminalPhase = t.executionProgress?.phase && isTerminalPhase(t.executionProgress.phase);
-
-          // FIX (Flip-Flop Bug): Respect explicit human_review status from plan file
-          // When the plan explicitly says 'human_review', don't override it with calculated status
-          // Note: ImplementationPlan type already defines status?: TaskStatus
-          const planStatus = plan.status;
-          const isExplicitHumanReview = planStatus === 'human_review';
-
-          // FIX (ACS-203): Add defensive check for terminal status transitions
-          // Before allowing transition to 'done', 'human_review', or 'ai_review', verify:
-          // 1. Subtasks array is properly populated (not empty)
-          // 2. All subtasks are actually completed (for 'done' and 'ai_review' statuses)
-          const hasSubtasks = subtasks.length > 0;
-          const terminalStatuses: TaskStatus[] = ['human_review', 'pr_created', 'done'];
-
-          // If task is currently in a terminal status, validate subtasks before allowing downgrade
-          // This prevents flip-flop when plan file is written with incomplete data
-          const shouldBlockTerminalTransition = (newStatus: TaskStatus): boolean => {
-            // Block if: moving to terminal status but subtasks indicate incomplete work
-            if (terminalStatuses.includes(newStatus) || newStatus === 'ai_review') {
-              // For ai_review, all subtasks must be completed
-              if (newStatus === 'ai_review' && (!allCompleted || !hasSubtasks)) {
-                return true;
-              }
-              // For done and pr_created, all subtasks must be completed
-              if ((newStatus === 'done' || newStatus === 'pr_created') && (!allCompleted || !hasSubtasks)) {
-                return true;
-              }
-              // For human_review with 'completed' reason, all subtasks must be done
-              // But allow 'errors' or 'qa_rejected' reasons even with incomplete subtasks
-              if (newStatus === 'human_review' && anyFailed) {
-                return false; // Allow human_review for failed subtasks
-              }
-            }
-            return false;
-          };
-
-          // Only recalculate status if:
-          // 1. NOT in an active execution phase (planning, coding, qa_review, qa_fixing)
-          // 2. NOT in a terminal phase (complete, failed) - status should be stable
-          // 3. Plan doesn't explicitly say human_review
-          // 4. Would not create an invalid terminal transition (ACS-203)
-          if (!isInActivePhase && !isInTerminalPhase && !isExplicitHumanReview) {
-            if (allCompleted && hasSubtasks) {
-              // FIX (Flip-Flop Bug): Don't downgrade from terminal statuses to ai_review
-              // Once a task reaches human_review, pr_created, or done, it should stay there
-              // unless explicitly changed (these are finalized workflow states)
-              if (!terminalStatuses.includes(t.status)) {
-                status = 'ai_review';
-              }
-            } else if (anyFailed) {
-              status = 'human_review';
-              reviewReason = 'errors';
-            } else if (anyInProgress || anyCompleted) {
-              status = 'in_progress';
-            }
-          }
-
-          // FIX (ACS-203): Final validation - prevent invalid terminal status transitions
-          // This catches cases where the logic above would set a terminal status
-          // but the subtask state doesn't support it (e.g., empty subtasks array)
-          if (shouldBlockTerminalTransition(status)) {
-            // Capture attempted status before reassignment for accurate logging
-            const attemptedStatus = status;
-            // Keep current status instead of transitioning to invalid terminal state
-            status = t.status;
-            debugLog('[updateTaskFromPlan] Blocked invalid terminal transition:', {
-              taskId,
-              attemptedStatus,
-              currentStatus: t.status,
-              hasSubtasks,
-              allCompleted,
-              anyFailed,
-              subtaskCount: subtasks.length
-            });
-          }
-
-          debugLog('[updateTaskFromPlan] Status computation:', {
-            taskId,
-            currentStatus: t.status,
-            newStatus: status,
-            isInActivePhase,
-            isInTerminalPhase,
-            isExplicitHumanReview,
-            planStatus,
-            currentPhase: t.executionProgress?.phase,
-            allCompleted,
-            anyFailed,
-            anyInProgress,
-            anyCompleted
-          });
+          // NOTE: We do NOT update status from plan anymore.
+          // XState is the source of truth for status - it emits TASK_STATUS_CHANGE.
+          // Plan updates only update subtasks, title, and other non-status fields.
+          // This prevents race conditions where a stale plan overwrites XState status.
 
           return {
             ...t,
             title: plan.feature || t.title,
             subtasks,
-            status,
-            reviewReason,
+            // Keep existing status and reviewReason - XState manages these via TASK_STATUS_CHANGE
             updatedAt: new Date()
           };
         })
       };
     }),
 
-  updateExecutionProgress: (taskId, progress) =>
+  updateExecutionProgress: (taskId, progress) => {
+    // Record activity for stuck detection (outside of set() to avoid triggering extra renders)
+    recordTaskActivity(taskId);
+
     set((state) => {
       const index = findTaskIndex(state.tasks, taskId);
       if (index === -1) return state;
@@ -425,12 +453,24 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           };
         })
       };
-    }),
+    });
+  },
 
   appendLog: (taskId, log) =>
     set((state) => {
       const index = findTaskIndex(state.tasks, taskId);
-      if (index === -1) return state;
+      if (index === -1) {
+        debugWarn('[TaskStore.appendLog] Task not found:', taskId);
+        return state;
+      }
+
+      const currentLogCount = state.tasks[index].logs?.length || 0;
+      debugLog('[TaskStore.appendLog] Appending log:', {
+        taskId,
+        currentLogCount,
+        newLogCount: currentLogCount + 1,
+        logPreview: log.substring(0, 100)
+      });
 
       return {
         tasks: updateTaskAtIndex(state.tasks, index, (t) => ({
@@ -441,11 +481,29 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }),
 
   // Batch append multiple logs at once (single state update instead of N updates)
-  batchAppendLogs: (taskId, logs) =>
-    set((state) => {
-      if (logs.length === 0) return state;
+  batchAppendLogs: (taskId, logs) => {
+    // Record activity for stuck detection — log output proves the task is alive
+    recordTaskActivity(taskId);
+    return set((state) => {
+      if (logs.length === 0) {
+        debugLog('[TaskStore.batchAppendLogs] No logs to append for task:', taskId);
+        return state;
+      }
       const index = findTaskIndex(state.tasks, taskId);
-      if (index === -1) return state;
+      if (index === -1) {
+        debugWarn('[TaskStore.batchAppendLogs] Task not found:', taskId);
+        return state;
+      }
+
+      const currentLogCount = state.tasks[index].logs?.length || 0;
+      const newLogCount = currentLogCount + logs.length;
+      debugLog('[TaskStore.batchAppendLogs] Batch appending logs:', {
+        taskId,
+        currentLogCount,
+        newLogsCount: logs.length,
+        newLogCount,
+        firstLogPreview: logs[0]?.substring(0, 100)
+      });
 
       return {
         tasks: updateTaskAtIndex(state.tasks, index, (t) => ({
@@ -453,7 +511,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           logs: [...(t.logs || []), ...logs]
         }))
       };
-    }),
+    });
+  },
 
   selectTask: (taskId) => set({ selectedTaskId: taskId }),
 
@@ -518,12 +577,13 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   loadTaskOrder: (projectId) => {
     try {
       const key = getTaskOrderKey(projectId);
+      debugLog('[TaskStore.loadTaskOrder] Loading task order:', { projectId, key });
       const stored = localStorage.getItem(key);
       if (stored) {
         const parsed = JSON.parse(stored);
         // Validate structure before assigning - type assertion is compile-time only
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          console.warn('Invalid task order data in localStorage, resetting to empty');
+          debugWarn('[TaskStore.loadTaskOrder] Invalid task order data in localStorage, resetting to empty');
           set({ taskOrder: createEmptyTaskOrder() });
           return;
         }
@@ -536,19 +596,26 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         const emptyOrder = createEmptyTaskOrder();
         const validatedOrder: TaskOrderState = {
           backlog: isValidColumnArray(parsed.backlog) ? parsed.backlog : emptyOrder.backlog,
+          queue: isValidColumnArray(parsed.queue) ? parsed.queue : emptyOrder.queue,
           in_progress: isValidColumnArray(parsed.in_progress) ? parsed.in_progress : emptyOrder.in_progress,
           ai_review: isValidColumnArray(parsed.ai_review) ? parsed.ai_review : emptyOrder.ai_review,
           human_review: isValidColumnArray(parsed.human_review) ? parsed.human_review : emptyOrder.human_review,
+          done: isValidColumnArray(parsed.done) ? parsed.done : emptyOrder.done,
           pr_created: isValidColumnArray(parsed.pr_created) ? parsed.pr_created : emptyOrder.pr_created,
-          done: isValidColumnArray(parsed.done) ? parsed.done : emptyOrder.done
+          error: isValidColumnArray(parsed.error) ? parsed.error : emptyOrder.error
         };
 
+        debugLog('[TaskStore.loadTaskOrder] Loaded task order:', {
+          projectId,
+          columnCounts: Object.entries(validatedOrder).map(([col, ids]) => ({ col, count: ids.length }))
+        });
         set({ taskOrder: validatedOrder });
       } else {
+        debugLog('[TaskStore.loadTaskOrder] No stored task order found, using empty order');
         set({ taskOrder: createEmptyTaskOrder() });
       }
     } catch (error) {
-      console.error('Failed to load task order:', error);
+      debugWarn('[TaskStore.loadTaskOrder] Failed to load task order:', error);
       set({ taskOrder: createEmptyTaskOrder() });
     }
   },
@@ -588,25 +655,57 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   getTasksByStatus: (status) => {
     const state = get();
     return state.tasks.filter((t) => t.status === status);
+  },
+
+  registerTaskStatusChangeListener: (listener) => {
+    taskStatusChangeListeners.add(listener);
+    // Return cleanup function to unregister
+    return () => {
+      taskStatusChangeListeners.delete(listener);
+    };
   }
 }));
 
 /**
  * Load tasks for a project
+ * @param projectId - The project ID to load tasks for
+ * @param options - Optional parameters
+ * @param options.forceRefresh - If true, invalidates server-side cache before fetching (for refresh button)
  */
-export async function loadTasks(projectId: string): Promise<void> {
+export async function loadTasks(projectId: string, options?: { forceRefresh?: boolean }): Promise<void> {
   const store = useTaskStore.getState();
   store.setLoading(true);
   store.setError(null);
 
+  debugLog('[TaskStore.loadTasks] Loading tasks for project:', {
+    projectId,
+    forceRefresh: options?.forceRefresh || false,
+    currentTaskCount: store.tasks.length
+  });
+
   try {
-    const result = await window.electronAPI.getTasks(projectId);
+    const result = await window.electronAPI.getTasks(projectId, options);
+
+    debugLog('[TaskStore.loadTasks] Received result from IPC:', {
+      success: result.success,
+      dataPresent: !!result.data,
+      taskCount: result.data?.length || 0,
+      error: result.error
+    });
+
     if (result.success && result.data) {
+      debugLog('[TaskStore.loadTasks] Tasks loaded successfully:', {
+        count: result.data.length,
+        tasksWithLogs: result.data.filter(t => t.logs && t.logs.length > 0).length,
+        totalLogCount: result.data.reduce((sum, t) => sum + (t.logs?.length || 0), 0)
+      });
       store.setTasks(result.data);
     } else {
+      debugWarn('[TaskStore.loadTasks] Failed to load tasks:', result.error);
       store.setError(result.error || 'Failed to load tasks');
     }
   } catch (error) {
+    debugWarn('[TaskStore.loadTasks] Exception while loading tasks:', error);
     store.setError(error instanceof Error ? error.message : 'Unknown error');
   } finally {
     store.setLoading(false);
@@ -662,12 +761,9 @@ export async function submitReview(
   feedback?: string,
   images?: ImageAttachment[]
 ): Promise<boolean> {
-  const store = useTaskStore.getState();
-
   try {
     const result = await window.electronAPI.submitReview(taskId, approved, feedback, images);
     if (result.success) {
-      store.updateTaskStatus(taskId, approved ? 'done' : 'in_progress');
       return true;
     }
     return false;
@@ -735,6 +831,54 @@ export async function forceCompleteTask(taskId: string): Promise<PersistStatusRe
 }
 
 /**
+ * Check if the in_progress queue is at capacity.
+ * @param excludeTaskId - Task ID to exclude from the count (e.g., when restarting a stuck task already in in_progress)
+ */
+export function isQueueAtCapacity(excludeTaskId?: string): boolean {
+  const maxParallelTasks = useProjectStore.getState().getActiveProject()?.settings?.maxParallelTasks ?? DEFAULT_MAX_PARALLEL_TASKS;
+  const currentTasks = useTaskStore.getState().tasks;
+  const inProgressCount = currentTasks.filter((t) =>
+    t.status === 'in_progress' && !t.metadata?.archivedAt && (!excludeTaskId || t.id !== excludeTaskId)
+  ).length;
+  return inProgressCount >= maxParallelTasks;
+}
+
+export interface StartTaskOrQueueResult {
+  /** Whether the task was started ('started') or redirected to queue ('queued') */
+  action: 'started' | 'queued';
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * Start a task or queue it if parallel task capacity is full.
+ * If the task is already in_progress (stuck restart), it is excluded from the
+ * capacity count so restarting is always allowed.
+ * Returns a result so callers can provide user-facing feedback.
+ *
+ * For action 'started', success indicates the IPC start command was dispatched.
+ * Backend failures are surfaced asynchronously through task status change events,
+ * not through this return value.
+ */
+export async function startTaskOrQueue(taskId: string): Promise<StartTaskOrQueueResult> {
+  const task = useTaskStore.getState().tasks.find(t => t.id === taskId);
+  // Exclude this task from the capacity check when it's already in_progress (stuck restart)
+  const excludeId = task?.status === 'in_progress' ? taskId : undefined;
+
+  if (isQueueAtCapacity(excludeId)) {
+    const result = await persistTaskStatus(taskId, 'queue');
+    if (!result.success) {
+      console.error('[Queue] Failed to queue task:', taskId, result.error);
+      return { action: 'queued', success: false, error: result.error };
+    }
+    return { action: 'queued', success: true };
+  }
+
+  startTask(taskId);
+  return { action: 'started', success: true };
+}
+
+/**
  * Update task title/description/metadata and persist to file
  */
 export async function persistUpdateTask(
@@ -788,14 +932,10 @@ export async function recoverStuckTask(
   taskId: string,
   options: { targetStatus?: TaskStatus; autoRestart?: boolean } = { autoRestart: true }
 ): Promise<{ success: boolean; message: string; autoRestarted?: boolean }> {
-  const store = useTaskStore.getState();
-
   try {
     const result = await window.electronAPI.recoverStuckTask(taskId, options);
 
     if (result.success && result.data) {
-      // Update local state
-      store.updateTaskStatus(taskId, result.data.newStatus);
       return {
         success: true,
         message: result.data.message,
@@ -843,6 +983,52 @@ export async function deleteTask(
     };
   } catch (error) {
     console.error('Error deleting task:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+}
+
+/**
+ * Delete multiple tasks
+ * Permanently removes tasks from the project
+ */
+export async function deleteTasks(
+  taskIds: string[]
+): Promise<{ success: boolean; error?: string; failedIds?: string[] }> {
+  const store = useTaskStore.getState();
+  const failedIds: string[] = [];
+
+  try {
+    // Delete tasks one by one (API only supports single delete)
+    for (const taskId of taskIds) {
+      const result = await window.electronAPI.deleteTask(taskId);
+      if (!result.success) {
+        failedIds.push(taskId);
+      }
+    }
+
+    // Remove successfully deleted tasks from local state
+    const deletedIds = new Set(taskIds.filter(id => !failedIds.includes(id)));
+    store.setTasks(store.tasks.filter(t => !deletedIds.has(t.id) && !deletedIds.has(t.specId || '')));
+
+    // Clear selection if selected task was deleted
+    if (store.selectedTaskId && deletedIds.has(store.selectedTaskId)) {
+      store.selectTask(null);
+    }
+
+    if (failedIds.length > 0) {
+      return {
+        success: false,
+        error: `Failed to delete ${failedIds.length} task(s)`,
+        failedIds
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting tasks:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -997,7 +1183,8 @@ export function isIncompleteHumanReview(task: Task): boolean {
   if (task.status !== 'human_review') return false;
 
   // JSON error tasks are intentionally in human_review with no subtasks - not incomplete
-  if (task.reviewReason === 'errors') return false;
+  // plan_review tasks are waiting for human approval before coding - not incomplete
+  if (task.reviewReason === 'errors' || task.reviewReason === 'stopped' || task.reviewReason === 'plan_review') return false;
 
   // If no subtasks defined, task hasn't been planned yet (shouldn't be in human_review)
   if (!task.subtasks || task.subtasks.length === 0) return true;

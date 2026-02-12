@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Brain, Scale, Zap, Sliders, Sparkles, ChevronDown, ChevronUp, Pencil } from 'lucide-react';
 import { Label } from './ui/label';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import {
   Select,
   SelectContent,
@@ -23,7 +24,8 @@ import {
   AVAILABLE_MODELS,
   THINKING_LEVELS,
   DEFAULT_PHASE_MODELS,
-  DEFAULT_PHASE_THINKING
+  DEFAULT_PHASE_THINKING,
+  ADAPTIVE_THINKING_MODELS
 } from '../../shared/constants';
 import type { ModelType, ThinkingLevel } from '../../shared/types';
 import type { PhaseModelConfig, PhaseThinkingConfig, PhaseModelConfigV3, ProfileModelPair } from '../../shared/types/settings';
@@ -90,7 +92,7 @@ export function AgentProfileSelector({
   const { settings } = useSettingsStore();
 
   const isCustom = profileId === 'custom';
-  const isAuto = profileId === 'auto';
+  const _isAuto = profileId === 'auto';
 
   // Use provided V3 config or migrate from defaults
   const currentPhaseModelsV3: PhaseModelConfigV3 = phaseModelsV3 || (() => {
@@ -296,7 +298,21 @@ export function AgentProfileSelector({
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[10px] text-muted-foreground">{t('agentProfile.thinking')}</Label>
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-[10px] text-muted-foreground">{t('agentProfile.thinking')}</Label>
+                        {ADAPTIVE_THINKING_MODELS.includes(currentPhaseModelsV3[phase][0]?.model || '') && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary cursor-help">
+                                {t('agentProfile.adaptiveThinking.badge')}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-xs">
+                              <p className="text-xs">{t('agentProfile.adaptiveThinking.tooltip')}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                      </div>
                       <Select
                         value={currentPhaseThinking[phase]}
                         onValueChange={(value) => handlePhaseThinkingChange(phase, value as ThinkingLevel)}

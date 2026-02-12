@@ -29,6 +29,24 @@ export const API_PROVIDER_PRESETS: readonly ApiProviderPreset[] = [
     category: 'cloud'
   },
   {
+    id: 'codex',
+    baseUrl: 'https://api.openai.com/v1',
+    labelKey: 'settings:apiProfiles.presets.codex',
+    description: 'OpenAI endpoint preset for Codex/GPT coding models',
+    apiKeyPlaceholder: 'sk-proj-...',
+    docsUrl: 'https://platform.openai.com/docs/models',
+    category: 'cloud'
+  },
+  {
+    id: 'kimi',
+    baseUrl: 'https://api.moonshot.ai/v1',
+    labelKey: 'settings:apiProfiles.presets.kimi',
+    description: 'Moonshot Kimi API (OpenAI-compatible)',
+    apiKeyPlaceholder: 'sk-...',
+    docsUrl: 'https://platform.moonshot.ai/docs',
+    category: 'cloud'
+  },
+  {
     id: 'openrouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     labelKey: 'settings:apiProfiles.presets.openrouter',
@@ -89,6 +107,15 @@ export const API_PROVIDER_PRESETS: readonly ApiProviderPreset[] = [
     description: 'Open-source models at scale',
     apiKeyPlaceholder: 'your-together-api-key',
     docsUrl: 'https://docs.together.ai/docs/quickstart',
+    category: 'cloud'
+  },
+  {
+    id: 'opencode',
+    baseUrl: 'https://api.opencode.ai/v1',
+    labelKey: 'settings:apiProfiles.presets.opencode',
+    description: 'OpenCode-compatible API preset',
+    apiKeyPlaceholder: 'your-opencode-api-key',
+    docsUrl: 'https://opencode.ai/',
     category: 'cloud'
   },
 

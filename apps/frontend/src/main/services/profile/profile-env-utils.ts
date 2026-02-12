@@ -2,9 +2,45 @@ import { readSettingsFile } from '../../settings-utils';
 import { getClaudeProfileManager } from '../../claude-profile-manager';
 import { loadProfilesFile } from './profile-manager';
 import { normalizeBaseUrlForSdk } from './profile-service';
-import type { ProfileModelPair } from '../../../shared/types/settings';
+import type { PhaseModelConfigV3, ProfileModelPair } from '../../../shared/types/settings';
 import type { APIProfile } from '../../../shared/types/profile';
-import type { ClaudeProfile } from '../../../shared/types';
+
+type PhaseKey = 'spec' | 'planning' | 'coding' | 'qa';
+const PHASE_KEYS: PhaseKey[] = ['spec', 'planning', 'coding', 'qa'];
+const PHASE_PROVIDER_AUTH_KEYS = [
+    'CLAUDE_CONFIG_DIR',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY'
+] as const;
+
+export interface PhaseProviderEnvEntry {
+    profileId: string;
+    model: string;
+    env: Record<string, string>;
+}
+
+export type PhaseProviderEnvConfig = Record<PhaseKey, PhaseProviderEnvEntry[]>;
+
+export function hasProviderAuthEnv(env: Record<string, string> | undefined): boolean {
+    if (!env) {
+        return false;
+    }
+
+    return PHASE_PROVIDER_AUTH_KEYS.some((key) => {
+        const value = env[key];
+        return typeof value === 'string' && value.trim().length > 0;
+    });
+}
+
+export function hasProviderAuthInConfig(config: PhaseProviderEnvConfig | null | undefined): boolean {
+    if (!config) {
+        return false;
+    }
+
+    return PHASE_KEYS.some((phase) => config[phase].some((entry) => hasProviderAuthEnv(entry.env)));
+}
 export async function getProfileEnvForPair(
     pair: ProfileModelPair
 ): Promise<Record<string, string>> {
@@ -42,16 +78,15 @@ async function getOAuthProfileEnv(
     const profileManager = getClaudeProfileManager();
 
     try {
-        // Set the active Claude profile
-        await profileManager.setActiveProfile(claudeProfileId);
-
-        // OAuth mode: Clear API profile vars, set model
+        // Return env for the explicitly selected OAuth account.
+        // Do not mutate global active profile here.
+        const profileEnv = profileManager.getProfileEnv(claudeProfileId);
         return {
+            ...profileEnv,
             ANTHROPIC_MODEL: model,
-            // OAuth token will be loaded by the SDK from the Claude profile's config
         };
     } catch (err) {
-        console.error(`[ProfileEnv] Failed to activate OAuth profile ${claudeProfileId}:`, err);
+        console.error(`[ProfileEnv] Failed to resolve OAuth profile ${claudeProfileId}:`, err);
         return {};
     }
 }
@@ -144,4 +179,62 @@ async function getAPIProfileEnvById(
     }
 
     return filteredEnvVars;
+}
+
+function isUsablePair(pair: ProfileModelPair | undefined): pair is ProfileModelPair {
+    return Boolean(
+        pair &&
+        typeof pair.profileId === 'string' &&
+        typeof pair.model === 'string' &&
+        pair.profileId.trim() &&
+        pair.model.trim()
+    );
+}
+
+/**
+ * Build phase-specific provider env chains from V3 config.
+ * Empty/invalid providers are skipped, which implements automatic "use next valid provider" behavior.
+ */
+export async function buildPhaseProviderEnvConfig(
+    phaseModelsV3?: PhaseModelConfigV3
+): Promise<PhaseProviderEnvConfig | null> {
+    if (!phaseModelsV3) {
+        return null;
+    }
+
+    const config: PhaseProviderEnvConfig = {
+        spec: [],
+        planning: [],
+        coding: [],
+        qa: []
+    };
+
+    for (const phase of PHASE_KEYS) {
+        const chain = phaseModelsV3[phase] || [];
+        for (const pair of chain) {
+            if (!isUsablePair(pair)) {
+                continue;
+            }
+
+            try {
+                const env = await getProfileEnvForPair(pair);
+                if (!env || Object.keys(env).length === 0) {
+                    continue;
+                }
+                config[phase].push({
+                    profileId: pair.profileId.trim(),
+                    model: pair.model.trim(),
+                    env: {
+                        ...env,
+                        ANTHROPIC_MODEL: pair.model.trim()
+                    }
+                });
+            } catch (error) {
+                console.warn(`[ProfileEnv] Failed to build provider env for ${phase}:`, error);
+            }
+        }
+    }
+
+    const hasAnyEntry = PHASE_KEYS.some((phase) => config[phase].length > 0);
+    return hasAnyEntry ? config : null;
 }

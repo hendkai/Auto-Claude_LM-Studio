@@ -151,6 +151,7 @@ export interface TaskDraft {
   thinkingLevel: ThinkingLevel | '';
   // Auto profile - per-phase configuration
   phaseModels?: PhaseModelConfig;
+  phaseModelsV3?: PhaseModelConfigV3;
   phaseThinking?: PhaseThinkingConfig;
   images: ImageAttachment[];
   referencedFiles: ReferencedFile[];

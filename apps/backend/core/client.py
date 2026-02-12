@@ -16,17 +16,13 @@ import copy
 import json
 import logging
 import os
-import shutil
-import subprocess
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
+from core.fast_mode import ensure_fast_mode_in_user_settings
 from core.platform import (
-    get_claude_detection_paths_structured,
-    get_comspec_path,
-    is_macos,
     is_windows,
     validate_cli_path,
 )
@@ -130,220 +126,6 @@ def invalidate_project_cache(project_dir: Path | None = None) -> None:
                 logger.debug(f"Invalidated project index cache for {project_dir}")
 
 
-# =============================================================================
-# Claude CLI Path Detection
-# =============================================================================
-# Cross-platform detection of Claude Code CLI binary.
-# This mirrors the frontend's cli-tool-manager.ts logic to ensure consistency.
-
-_CLAUDE_CLI_CACHE: dict[str, str | None] = {}
-_CLI_CACHE_LOCK = threading.Lock()
-
-
-def _get_claude_detection_paths() -> dict[str, list[str] | str]:
-    """
-    Get all candidate paths for Claude CLI detection.
-
-    This is a thin wrapper around the platform module's implementation.
-    See core/platform/__init__.py:get_claude_detection_paths_structured()
-    for the canonical implementation.
-
-    Returns:
-        Dict with 'homebrew', 'platform', and 'nvm_versions_dir' keys
-    """
-    return get_claude_detection_paths_structured()
-
-
-def _validate_claude_cli(cli_path: str) -> tuple[bool, str | None]:
-    """
-    Validate that a Claude CLI path is executable and returns a version.
-
-    Includes security validation to prevent command injection attacks.
-
-    Args:
-        cli_path: Path to the Claude CLI executable
-
-    Returns:
-        Tuple of (is_valid, version_string or None)
-
-    Note:
-        Cross-references with frontend's validateClaudeCliAsync() in
-        apps/frontend/src/main/ipc-handlers/claude-code-handlers.ts
-        Both should be kept in sync for consistent behavior.
-    """
-    import re
-
-    # Security validation: reject paths with shell metacharacters or directory traversal
-    if not validate_cli_path(cli_path):
-        logger.warning(f"Rejecting insecure Claude CLI path: {cli_path}")
-        return False, None
-
-    try:
-        # Augment PATH with the CLI directory for proper resolution
-        env = os.environ.copy()
-        cli_dir = os.path.dirname(cli_path)
-        if cli_dir:
-            env["PATH"] = cli_dir + os.pathsep + env.get("PATH", "")
-
-        # For Windows .cmd/.bat files, use cmd.exe with proper quoting
-        # /d = disable AutoRun registry commands
-        # /s = strip first and last quotes, preserving inner quotes
-        # /c = run command then terminate
-        if is_windows() and cli_path.lower().endswith((".cmd", ".bat")):
-            # Get cmd.exe path from platform module
-            cmd_exe = get_comspec_path()
-            # Use double-quoted command line for paths with spaces
-            cmd_line = f'""{cli_path}" --version"'
-            result = subprocess.run(
-                [cmd_exe, "/d", "/s", "/c", cmd_line],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                env=env,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        else:
-            result = subprocess.run(
-                [cli_path, "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                env=env,
-                creationflags=subprocess.CREATE_NO_WINDOW if is_windows() else 0,
-            )
-
-        if result.returncode == 0:
-            # Extract version from output (e.g., "claude-code version 1.0.0")
-            output = result.stdout.strip()
-            match = re.search(r"(\d+\.\d+\.\d+)", output)
-            version = match.group(1) if match else output.split("\n")[0]
-            return True, version
-
-        return False, None
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-        logger.debug(f"Claude CLI validation failed for {cli_path}: {e}")
-        return False, None
-
-
-def find_claude_cli() -> str | None:
-    """
-    Find the Claude Code CLI binary path.
-
-    Uses cross-platform detection with the following priority:
-    1. CLAUDE_CLI_PATH environment variable (user override)
-    2. shutil.which() - system PATH lookup
-    3. Homebrew paths (macOS)
-    4. NVM paths (Unix - checks Node.js version manager)
-    5. Platform-specific standard locations
-
-    Returns:
-        Path to Claude CLI if found and valid, None otherwise
-    """
-    # Check cache first
-    cache_key = "claude_cli"
-    with _CLI_CACHE_LOCK:
-        if cache_key in _CLAUDE_CLI_CACHE:
-            cached = _CLAUDE_CLI_CACHE[cache_key]
-            logger.debug(f"Using cached Claude CLI path: {cached}")
-            return cached
-
-    paths = _get_claude_detection_paths()
-
-    # 1. Check environment variable override
-    env_path = os.environ.get("CLAUDE_CLI_PATH")
-    if env_path:
-        if Path(env_path).exists():
-            valid, version = _validate_claude_cli(env_path)
-            if valid:
-                logger.info(f"Using CLAUDE_CLI_PATH: {env_path} (v{version})")
-                with _CLI_CACHE_LOCK:
-                    _CLAUDE_CLI_CACHE[cache_key] = env_path
-                return env_path
-        logger.warning(f"CLAUDE_CLI_PATH is set but invalid: {env_path}")
-
-    # 2. Try shutil.which() - most reliable cross-platform PATH lookup
-    which_path = shutil.which("claude")
-    if which_path:
-        valid, version = _validate_claude_cli(which_path)
-        if valid:
-            logger.info(f"Found Claude CLI in PATH: {which_path} (v{version})")
-            with _CLI_CACHE_LOCK:
-                _CLAUDE_CLI_CACHE[cache_key] = which_path
-            return which_path
-
-    # 3. Homebrew paths (macOS)
-    if is_macos():
-        for hb_path in paths["homebrew"]:
-            if Path(hb_path).exists():
-                valid, version = _validate_claude_cli(hb_path)
-                if valid:
-                    logger.info(f"Found Claude CLI (Homebrew): {hb_path} (v{version})")
-                    with _CLI_CACHE_LOCK:
-                        _CLAUDE_CLI_CACHE[cache_key] = hb_path
-                    return hb_path
-
-    # 4. NVM paths (Unix only) - check Node.js version manager installations
-    if not is_windows():
-        nvm_dir = Path(paths["nvm_versions_dir"])
-        if nvm_dir.exists():
-            try:
-                # Get all version directories and sort by version (newest first)
-                version_dirs = []
-                for entry in nvm_dir.iterdir():
-                    if entry.is_dir() and entry.name.startswith("v"):
-                        # Parse version: v20.0.0 -> (20, 0, 0)
-                        try:
-                            parts = entry.name[1:].split(".")
-                            if len(parts) == 3:
-                                version_dirs.append(
-                                    (tuple(int(p) for p in parts), entry.name)
-                                )
-                        except ValueError:
-                            continue
-
-                # Sort by version descending (newest first)
-                version_dirs.sort(reverse=True)
-
-                for _, version_name in version_dirs:
-                    nvm_claude = nvm_dir / version_name / "bin" / "claude"
-                    if nvm_claude.exists():
-                        valid, version = _validate_claude_cli(str(nvm_claude))
-                        if valid:
-                            logger.info(
-                                f"Found Claude CLI (NVM): {nvm_claude} (v{version})"
-                            )
-                            with _CLI_CACHE_LOCK:
-                                _CLAUDE_CLI_CACHE[cache_key] = str(nvm_claude)
-                            return str(nvm_claude)
-            except OSError as e:
-                logger.debug(f"Error scanning NVM directory: {e}")
-
-    # 5. Platform-specific standard locations
-    for plat_path in paths["platform"]:
-        if Path(plat_path).exists():
-            valid, version = _validate_claude_cli(plat_path)
-            if valid:
-                logger.info(f"Found Claude CLI: {plat_path} (v{version})")
-                with _CLI_CACHE_LOCK:
-                    _CLAUDE_CLI_CACHE[cache_key] = plat_path
-                return plat_path
-
-    # Not found
-    logger.warning(
-        "Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
-    )
-    with _CLI_CACHE_LOCK:
-        _CLAUDE_CLI_CACHE[cache_key] = None
-    return None
-
-
-def clear_claude_cli_cache() -> None:
-    """Clear the Claude CLI path cache, forcing re-detection on next call."""
-    with _CLI_CACHE_LOCK:
-        _CLAUDE_CLI_CACHE.clear()
-    logger.debug("Claude CLI cache cleared")
-
-
 from agents.tools_pkg import (
     CONTEXT7_TOOLS,
     ELECTRON_TOOLS,
@@ -358,9 +140,8 @@ from agents.tools_pkg import (
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from claude_agent_sdk.types import HookMatcher
 from core.auth import (
+    configure_sdk_authentication,
     get_sdk_env_vars,
-    require_auth_token,
-    validate_token_not_encrypted,
 )
 from linear_updater import is_linear_enabled
 from prompts_pkg.project_context import detect_project_capabilities, load_project_index
@@ -669,6 +450,9 @@ def create_client(
     max_thinking_tokens: int | None = None,
     output_format: dict | None = None,
     agents: dict | None = None,
+    betas: list[str] | None = None,
+    effort_level: str | None = None,
+    fast_mode: bool = False,
 ) -> ClaudeSDKClient:
     """
     Create a Claude Agent SDK client with multi-layered security.
@@ -684,10 +468,9 @@ def create_client(
         agent_type: Agent type identifier from AGENT_CONFIGS
                    (e.g., 'coder', 'planner', 'qa_reviewer', 'spec_gatherer')
         max_thinking_tokens: Token budget for extended thinking (None = disabled)
-                            - ultrathink: 16000 (spec creation)
-                            - high: 10000 (QA review)
-                            - medium: 5000 (planning, validation)
-                            - None: disabled (coding)
+                            - high: 16384 (spec creation, QA review)
+                            - medium: 4096 (planning, validation)
+                            - low: 1024 (coding)
         output_format: Optional structured output format for validated JSON responses.
                       Use {"type": "json_schema", "schema": Model.model_json_schema()}
                       See: https://platform.claude.com/docs/en/agent-sdk/structured-outputs
@@ -695,6 +478,16 @@ def create_client(
                Format: {"agent-name": {"description": "...", "prompt": "...",
                         "tools": [...], "model": "inherit"}}
                See: https://platform.claude.com/docs/en/agent-sdk/subagents
+        betas: Optional list of SDK beta header strings (e.g., ["context-1m-2025-08-07"]
+               for 1M context window). Use get_phase_model_betas() to compute from config.
+        effort_level: Optional effort level for adaptive thinking models (e.g., "low",
+                     "medium", "high"). When set, injected as CLAUDE_CODE_EFFORT_LEVEL
+                     env var for the SDK subprocess. Only meaningful for models that
+                     support adaptive thinking (e.g., Opus 4.6).
+        fast_mode: Enable Fast Mode for faster Opus 4.6 output. When True, enables
+                  the "user" setting source so the CLI reads fastMode from
+                  ~/.claude/settings.json. Requires extra usage enabled on Claude
+                  subscription; falls back to standard speed automatically.
 
     Returns:
         Configured ClaudeSDKClient
@@ -709,18 +502,36 @@ def create_client(
        (see security.py for ALLOWED_COMMANDS)
     4. Tool filtering - Each agent type only sees relevant tools (prevents misuse)
     """
-    oauth_token = require_auth_token()
-
-    # Validate token is not encrypted before passing to SDK
-    # Encrypted tokens (enc:...) should have been decrypted by require_auth_token()
-    # If we still have an encrypted token here, it means decryption failed or was skipped
-    validate_token_not_encrypted(oauth_token)
-
-    # Ensure SDK can access it via its expected env var
-    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = oauth_token
-
-    # Collect env vars to pass to SDK (ANTHROPIC_BASE_URL, etc.)
+    # Collect env vars to pass to SDK (ANTHROPIC_BASE_URL, CLAUDE_CONFIG_DIR, etc.)
     sdk_env = get_sdk_env_vars()
+
+    # Get the config dir for profile-specific credential lookup
+    # CLAUDE_CONFIG_DIR enables per-profile Keychain entries with SHA256-hashed service names
+    config_dir = sdk_env.get("CLAUDE_CONFIG_DIR")
+
+    # Configure SDK authentication (OAuth or API profile mode)
+    configure_sdk_authentication(config_dir)
+
+    if config_dir:
+        logger.info(f"Using CLAUDE_CONFIG_DIR for profile: {config_dir}")
+
+    # Inject effort level for adaptive thinking models (e.g., Opus 4.6)
+    if effort_level:
+        sdk_env["CLAUDE_CODE_EFFORT_LEVEL"] = effort_level
+
+    # Fast mode requires the CLI to read "fastMode" from user settings.
+    # The SDK default (setting_sources=None) passes --setting-sources "" which
+    # blocks ALL filesystem settings. We must explicitly enable "user" source
+    # so the CLI reads ~/.claude/settings.json where fastMode: true lives.
+    # See: https://code.claude.com/docs/en/fast-mode
+    if fast_mode:
+        ensure_fast_mode_in_user_settings()
+        logger.info("[Fast Mode] ACTIVE — will enable user setting source for fastMode")
+        print(
+            "[Fast Mode] ACTIVE — enabling user settings source for CLI to read fastMode"
+        )
+    else:
+        logger.info("[Fast Mode] inactive — not requested for this client")
 
     # Debug: Log git-bash path detection on Windows
     if "CLAUDE_CODE_GIT_BASH_PATH" in sdk_env:
@@ -875,7 +686,7 @@ def create_client(
 
     # Write settings to a file in the project directory
     settings_file = project_dir / ".claude_settings.json"
-    with open(settings_file, "w") as f:
+    with open(settings_file, "w", encoding="utf-8") as f:
         json.dump(security_settings, f, indent=2)
 
     print(f"Security settings: {settings_file}")
@@ -885,7 +696,12 @@ def create_client(
         print("   - Worktree permissions: granted for original project directories")
     print("   - Bash commands restricted to allowlist")
     if max_thinking_tokens:
-        print(f"   - Extended thinking: {max_thinking_tokens:,} tokens")
+        thinking_info = f"{max_thinking_tokens:,} tokens"
+        if effort_level:
+            thinking_info += f" + effort={effort_level}"
+        if fast_mode:
+            thinking_info += " + fast mode"
+        print(f"   - Extended thinking: {thinking_info}")
     else:
         print("   - Extended thinking: disabled")
 
@@ -1013,14 +829,6 @@ def create_client(
         print("   - CLAUDE.md: disabled by project settings")
     print()
 
-    # Find Claude CLI path for SDK
-    # This ensures the SDK can find the Claude Code binary even if it's not in PATH
-    cli_path = find_claude_cli()
-    if cli_path:
-        print(f"   - Claude CLI: {cli_path}")
-    else:
-        print("   - Claude CLI: using SDK default detection")
-
     # Build options dict, conditionally including output_format
     options_kwargs: dict[str, Any] = {
         "model": model,
@@ -1045,9 +853,18 @@ def create_client(
         "enable_file_checkpointing": True,
     }
 
-    # Add CLI path if found (helps SDK find Claude Code in non-standard locations)
-    if cli_path:
-        options_kwargs["cli_path"] = cli_path
+    # Fast mode: enable user setting source so CLI reads fastMode from
+    # ~/.claude/settings.json. Without this, the SDK's default --setting-sources ""
+    # blocks all filesystem settings and the CLI never sees fastMode: true.
+    if fast_mode:
+        options_kwargs["setting_sources"] = ["user"]
+
+    # Optional: Allow CLI path override via environment variable
+    # The SDK bundles its own CLI, but users can override if needed
+    env_cli_path = os.environ.get("CLAUDE_CLI_PATH")
+    if env_cli_path and validate_cli_path(env_cli_path):
+        options_kwargs["cli_path"] = env_cli_path
+        logger.info(f"Using CLAUDE_CLI_PATH override: {env_cli_path}")
 
     # Add structured output format if specified
     # See: https://platform.claude.com/docs/en/agent-sdk/structured-outputs
@@ -1058,5 +875,9 @@ def create_client(
     # See: https://platform.claude.com/docs/en/agent-sdk/subagents
     if agents:
         options_kwargs["agents"] = agents
+
+    # Add beta headers if specified (e.g., for 1M context window)
+    if betas:
+        options_kwargs["betas"] = betas
 
     return ClaudeSDKClient(options=ClaudeAgentOptions(**options_kwargs))

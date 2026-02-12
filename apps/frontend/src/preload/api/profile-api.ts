@@ -87,7 +87,7 @@ export const createProfileAPI = (): ProfileAPI => ({
     const requestId = ++testConnectionRequestId;
 
     // Check if already aborted before initiating request
-    if (signal && signal.aborted) {
+    if (signal?.aborted) {
       return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
     }
 
@@ -120,7 +120,7 @@ export const createProfileAPI = (): ProfileAPI => ({
     console.log('[preload/profile-api] Request ID:', requestId);
 
     // Check if already aborted before initiating request
-    if (signal && signal.aborted) {
+    if (signal?.aborted) {
       console.log('[preload/profile-api] Already aborted, rejecting');
       return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
     }
