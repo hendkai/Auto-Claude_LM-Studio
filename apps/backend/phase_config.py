@@ -135,6 +135,10 @@ class TaskMetadataConfig(TypedDict, total=False):
 Phase = Literal["spec", "planning", "coding", "qa"]
 
 PHASE_PROVIDER_ENV_CONFIG_KEY = "AUTOCLAUDE_PHASE_PROVIDER_ENV_V3"
+PHASE_PROVIDER_KIND_KEY = "AUTOCLAUDE_PROVIDER_KIND"
+PHASE_PROVIDER_CLI_TOOL_KEY = "AUTOCLAUDE_CLI_TOOL"
+PHASE_PROVIDER_CLI_PATH_KEY = "CLAUDE_CLI_PATH"
+PHASE_PROVIDER_CLI_KIND = "cli"
 PHASE_PROVIDER_AUTH_KEYS = (
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_CODE_OAUTH_TOKEN",
@@ -154,6 +158,9 @@ PHASE_PROVIDER_RESET_KEYS = (
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "OPENAI_BASE_URL",
     "OPENAI_API_KEY",
+    "CLAUDE_CLI_PATH",
+    PHASE_PROVIDER_KIND_KEY,
+    PHASE_PROVIDER_CLI_TOOL_KEY,
 )
 
 
@@ -304,6 +311,17 @@ def _load_phase_provider_env_config() -> PhaseProviderEnvConfig | None:
 
 
 def _entry_has_auth(entry_env: dict[str, Any]) -> bool:
+    provider_kind = entry_env.get(PHASE_PROVIDER_KIND_KEY)
+    cli_path = entry_env.get(PHASE_PROVIDER_CLI_PATH_KEY)
+
+    if (
+        isinstance(provider_kind, str)
+        and provider_kind.strip().lower() == PHASE_PROVIDER_CLI_KIND
+        and isinstance(cli_path, str)
+        and cli_path.strip()
+    ):
+        return True
+
     for key in PHASE_PROVIDER_AUTH_KEYS:
         value = entry_env.get(key)
         if isinstance(value, str) and value.strip():

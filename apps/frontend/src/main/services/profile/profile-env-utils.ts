@@ -1,5 +1,6 @@
 import { readSettingsFile } from '../../settings-utils';
 import { getClaudeProfileManager } from '../../claude-profile-manager';
+import { getToolInfoAsync } from '../../cli-tool-manager';
 import { loadProfilesFile } from './profile-manager';
 import { normalizeBaseUrlForSdk } from './profile-service';
 import type { PhaseModelConfigV3, ProfileModelPair } from '../../../shared/types/settings';
@@ -17,6 +18,9 @@ const PHASE_PROVIDER_AUTH_KEYS = [
 const CLI_KIMI_PROVIDER_HINTS = ['moonshot.ai', 'moonshot.cn'];
 const CLI_CODEX_PROVIDER_HINTS = ['api.openai.com', 'openrouter.ai', 'opencode.ai'];
 const CLI_OPENCODE_PROVIDER_HINTS = ['opencode.ai'];
+const CLI_PROVIDER_KIND_KEY = 'AUTOCLAUDE_PROVIDER_KIND';
+const CLI_PROVIDER_TOOL_KEY = 'AUTOCLAUDE_CLI_TOOL';
+const CLI_PROVIDER_KIND = 'cli';
 
 export interface PhaseProviderEnvEntry {
     profileId: string;
@@ -29,6 +33,12 @@ export type PhaseProviderEnvConfig = Record<PhaseKey, PhaseProviderEnvEntry[]>;
 export function hasProviderAuthEnv(env: Record<string, string> | undefined): boolean {
     if (!env) {
         return false;
+    }
+
+    const providerKind = env[CLI_PROVIDER_KIND_KEY]?.trim().toLowerCase();
+    const cliPath = env.CLAUDE_CLI_PATH?.trim();
+    if (providerKind === CLI_PROVIDER_KIND && cliPath) {
+        return true;
     }
 
     return PHASE_PROVIDER_AUTH_KEYS.some((key) => {
@@ -248,6 +258,23 @@ async function getFirstMatchingAPIProfileEnv(
     return buildAPIProfileEnv(matchingProfile, model);
 }
 
+async function getExternalCliPath(cliToolId: string): Promise<string | null> {
+    if (cliToolId !== 'kimi-code') {
+        return null;
+    }
+
+    try {
+        const toolInfo = await getToolInfoAsync('kimi');
+        if (toolInfo.found && toolInfo.path) {
+            return toolInfo.path;
+        }
+    } catch (error) {
+        console.warn(`[ProfileEnv] Failed to detect CLI path for ${cliToolId}:`, error);
+    }
+
+    return null;
+}
+
 async function getCLIProfileEnv(
     cliToolId: string,
     model: string
@@ -266,6 +293,16 @@ async function getCLIProfileEnv(
         }
 
         if (cliToolId === 'kimi-code') {
+            const kimiCliPath = await getExternalCliPath('kimi-code');
+            if (kimiCliPath) {
+                return {
+                    CLAUDE_CLI_PATH: kimiCliPath,
+                    ANTHROPIC_MODEL: model,
+                    [CLI_PROVIDER_KIND_KEY]: CLI_PROVIDER_KIND,
+                    [CLI_PROVIDER_TOOL_KEY]: 'kimi-code'
+                };
+            }
+
             return getFirstMatchingAPIProfileEnv(model, CLI_KIMI_PROVIDER_HINTS);
         }
 

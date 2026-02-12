@@ -442,6 +442,19 @@ def load_claude_md(project_dir: Path) -> str | None:
     return None
 
 
+def _is_external_cli_provider() -> bool:
+    """
+    Check whether the current phase is configured to run through a non-Claude CLI.
+
+    In this mode (e.g. Kimi Code CLI), Claude OAuth/API bootstrap should be skipped
+    because authentication is managed by the external CLI itself.
+    """
+    provider_kind = os.environ.get("AUTOCLAUDE_PROVIDER_KIND", "").strip().lower()
+    cli_tool = os.environ.get("AUTOCLAUDE_CLI_TOOL", "").strip().lower()
+    cli_path = os.environ.get("CLAUDE_CLI_PATH", "").strip()
+    return provider_kind == "cli" and bool(cli_path) and cli_tool not in {"", "claude-code"}
+
+
 def create_client(
     project_dir: Path,
     spec_dir: Path,
@@ -509,11 +522,18 @@ def create_client(
     # CLAUDE_CONFIG_DIR enables per-profile Keychain entries with SHA256-hashed service names
     config_dir = sdk_env.get("CLAUDE_CONFIG_DIR")
 
-    # Configure SDK authentication (OAuth or API profile mode)
-    configure_sdk_authentication(config_dir)
+    # Configure SDK authentication (OAuth/API) unless an external CLI provider
+    # is selected for this phase (e.g., Kimi Code CLI).
+    if _is_external_cli_provider():
+        logger.info(
+            "Using external CLI provider '%s' via CLAUDE_CLI_PATH, skipping Claude auth bootstrap",
+            os.environ.get("AUTOCLAUDE_CLI_TOOL", "unknown"),
+        )
+    else:
+        configure_sdk_authentication(config_dir)
 
-    if config_dir:
-        logger.info(f"Using CLAUDE_CONFIG_DIR for profile: {config_dir}")
+        if config_dir:
+            logger.info(f"Using CLAUDE_CONFIG_DIR for profile: {config_dir}")
 
     # Inject effort level for adaptive thinking models (e.g., Opus 4.6)
     if effort_level:
