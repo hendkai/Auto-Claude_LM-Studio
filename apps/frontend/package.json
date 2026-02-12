@@ -135,7 +135,7 @@
   "overrides": {
     "electron-builder-squirrel-windows": "^26.0.12",
     "dmg-builder": "^26.0.12",
-    "@electron/rebuild": "4.0.2"
+    "@electron/rebuild": "4.0.3"
   },
   "build": {
     "appId": "com.autoclaude.ui",
