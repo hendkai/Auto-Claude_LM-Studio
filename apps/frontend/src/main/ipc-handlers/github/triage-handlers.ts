@@ -199,13 +199,13 @@ function getGitHubIssuesSettings(): { model: string; thinkingLevel: string } {
   const featureThinking = rawSettings?.featureThinking ?? DEFAULT_FEATURE_THINKING;
 
   // Get Issues-specific settings (with fallback to defaults)
-  const modelShort = featureModels.githubIssues ?? DEFAULT_FEATURE_MODELS.githubIssues;
+  const modelRaw = String(featureModels.githubIssues ?? DEFAULT_FEATURE_MODELS.githubIssues).trim();
   const thinkingLevel = featureThinking.githubIssues ?? DEFAULT_FEATURE_THINKING.githubIssues;
 
-  // Convert model short name to full model ID
-  const model = MODEL_ID_MAP[modelShort] ?? MODEL_ID_MAP['opus'];
+  // Convert known shorthand to full model ID, otherwise pass through custom/full IDs.
+  const model = MODEL_ID_MAP[modelRaw] ?? (modelRaw || MODEL_ID_MAP['opus']);
 
-  debugLog('GitHub Issues settings', { modelShort, model, thinkingLevel });
+  debugLog('GitHub Issues settings', { modelRaw, model, thinkingLevel });
 
   return { model, thinkingLevel };
 }

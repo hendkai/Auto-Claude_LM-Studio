@@ -7,18 +7,19 @@ import { Switch } from '../ui/switch';
 import { SettingsSection } from './SettingsSection';
 import { AgentProfileSettings } from './AgentProfileSettings';
 import {
-  AVAILABLE_MODELS,
   THINKING_LEVELS,
   DEFAULT_FEATURE_MODELS,
   DEFAULT_FEATURE_THINKING,
   FEATURE_LABELS
 } from '../../../shared/constants';
-import { ModelSearchableSelect } from './ModelSearchableSelect';
+import { MultiProfileModelSelect } from './MultiProfileModelSelect';
 import { useSettingsStore } from '../../stores/settings-store';
 import type {
   AppSettings,
   FeatureModelConfig,
+  FeatureModelConfigV2,
   ModelTypeShort,
+  ProfileModelPair,
   ThinkingLevel,
   ToolDetectionResult
 } from '../../../shared/types';
@@ -93,8 +94,7 @@ function ToolDetectionDisplay({ info, isLoading, t }: ToolDetectionDisplayProps)
  */
 export function GeneralSettings({ settings, onSettingsChange, section }: GeneralSettingsProps) {
   const { t } = useTranslation('settings');
-  const { profiles, activeProfileId } = useSettingsStore();
-  const activeProfile = profiles.find(p => p.id === activeProfileId);
+  const { activeProfileId } = useSettingsStore();
   const [toolsInfo, setToolsInfo] = useState<{
     python: ToolDetectionResult;
     git: ToolDetectionResult;
@@ -125,6 +125,21 @@ export function GeneralSettings({ settings, onSettingsChange, section }: General
   }, [section]);
 
   if (section === 'agent') {
+    const featureModels = settings.featureModels || DEFAULT_FEATURE_MODELS;
+    const featureThinking = settings.featureThinking || DEFAULT_FEATURE_THINKING;
+    const defaultFeaturePair = (feature: keyof FeatureModelConfig): ProfileModelPair => ({
+      profileId: activeProfileId ? `api:${activeProfileId}` : '',
+      model: featureModels[feature] || ''
+    });
+    const featureModelsV2: FeatureModelConfigV2 = {
+      insights: settings.featureModelsV2?.insights || defaultFeaturePair('insights'),
+      ideation: settings.featureModelsV2?.ideation || defaultFeaturePair('ideation'),
+      roadmap: settings.featureModelsV2?.roadmap || defaultFeaturePair('roadmap'),
+      githubIssues: settings.featureModelsV2?.githubIssues || defaultFeaturePair('githubIssues'),
+      githubPrs: settings.featureModelsV2?.githubPrs || defaultFeaturePair('githubPrs'),
+      utility: settings.featureModelsV2?.utility || defaultFeaturePair('utility'),
+    };
+
     return (
       <div className="space-y-8">
         {/* Agent Profile Selection */}
@@ -179,9 +194,6 @@ export function GeneralSettings({ settings, onSettingsChange, section }: General
               </div>
 
               {(Object.keys(FEATURE_LABELS) as Array<keyof FeatureModelConfig>).map((feature) => {
-                const featureModels = settings.featureModels || DEFAULT_FEATURE_MODELS;
-                const featureThinking = settings.featureThinking || DEFAULT_FEATURE_THINKING;
-
                 return (
                   <div key={feature} className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -196,20 +208,20 @@ export function GeneralSettings({ settings, onSettingsChange, section }: General
                       {/* Model Select */}
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">{t('general.model')}</Label>
-                        <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">{t('general.model')}</Label>
-                          <ModelSearchableSelect
-                            value={featureModels[feature]}
-                            onChange={(value) => {
-                              const newFeatureModels = { ...featureModels, [feature]: value as ModelTypeShort };
-                              onSettingsChange({ ...settings, featureModels: newFeatureModels });
-                            }}
-                            baseUrl={activeProfile?.baseUrl || ''}
-                            apiKey={activeProfile?.apiKey || ''}
-                            disabled={!activeProfile}
-                            placeholder={activeProfile ? t('settings:modelSelect.placeholder') : "Select an API profile first"}
-                          />
-                        </div>
+                        <MultiProfileModelSelect
+                          value={featureModelsV2[feature]}
+                          onChange={(pair) => {
+                            const newFeatureModels = { ...featureModels, [feature]: pair.model as ModelTypeShort };
+                            const newFeatureModelsV2 = { ...featureModelsV2, [feature]: pair };
+                            onSettingsChange({
+                              ...settings,
+                              featureModels: newFeatureModels,
+                              featureModelsV2: newFeatureModelsV2
+                            });
+                          }}
+                          placeholder="Select model"
+                          className="w-full"
+                        />
                       </div>
                       {/* Thinking Level Select */}
                       <div className="space-y-1">

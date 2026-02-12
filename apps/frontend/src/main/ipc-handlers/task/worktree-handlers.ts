@@ -48,12 +48,12 @@ function getUtilitySettings(): { model: string; modelId: string; thinkingLevel: 
       const featureModels = settings.featureModels || DEFAULT_FEATURE_MODELS;
       const featureThinking = settings.featureThinking || DEFAULT_FEATURE_THINKING;
 
-      const model = featureModels.utility || DEFAULT_FEATURE_MODELS.utility;
+      const model = String(featureModels.utility || DEFAULT_FEATURE_MODELS.utility).trim();
       const thinkingLevel = featureThinking.utility || DEFAULT_FEATURE_THINKING.utility;
 
       return {
         model,
-        modelId: MODEL_ID_MAP[model] || MODEL_ID_MAP.haiku,
+        modelId: MODEL_ID_MAP[model] || model || MODEL_ID_MAP.haiku,
         thinkingLevel,
         thinkingBudget: thinkingLevel in THINKING_BUDGET_MAP ? THINKING_BUDGET_MAP[thinkingLevel] : THINKING_BUDGET_MAP.low
       };

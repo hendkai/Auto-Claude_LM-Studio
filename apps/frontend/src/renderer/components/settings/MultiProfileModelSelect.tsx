@@ -247,9 +247,9 @@ export function MultiProfileModelSelect({
 
             setProfileModels([
                 ...validOauthResults,
+                ...validCliResults,
                 ...validApiResults,
                 ...validLocalResult,
-                ...validCliResults
             ]);
         } finally {
             setIsLoading(false);

@@ -150,13 +150,13 @@ function getGitLabMRSettings(): { model: string; thinkingLevel: string } {
   const featureThinking = rawSettings?.featureThinking ?? DEFAULT_FEATURE_THINKING;
 
   // Use GitHub PRs settings as fallback (GitLab MRs not yet in settings)
-  const modelShort = featureModels.githubPrs ?? DEFAULT_FEATURE_MODELS.githubPrs;
+  const modelRaw = String(featureModels.githubPrs ?? DEFAULT_FEATURE_MODELS.githubPrs).trim();
   const thinkingLevel = featureThinking.githubPrs ?? DEFAULT_FEATURE_THINKING.githubPrs;
 
-  // Convert model short name to full model ID
-  const model = MODEL_ID_MAP[modelShort] ?? MODEL_ID_MAP['opus'];
+  // Convert known shorthand to full model ID, otherwise pass through custom/full IDs.
+  const model = MODEL_ID_MAP[modelRaw] ?? (modelRaw || MODEL_ID_MAP['opus']);
 
-  debugLog('GitLab MR settings', { modelShort, model, thinkingLevel });
+  debugLog('GitLab MR settings', { modelRaw, model, thinkingLevel });
 
   return { model, thinkingLevel };
 }
