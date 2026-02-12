@@ -71,9 +71,9 @@ jobs:
             export CSC_KEY_PASSWORD='${{ secrets.MAC_CERTIFICATE_PASSWORD }}'
             npm run package:mac -- --x64
           else
-            echo "::warning::MAC_CERTIFICATE not configured - building unsigned macOS (Intel) artifacts."
+            echo "::warning::MAC_CERTIFICATE not configured - building ad-hoc signed macOS (Intel) artifacts (not notarized)."
             export CSC_IDENTITY_AUTO_DISCOVERY=false
-            npm run package:mac -- --x64 --config.mac.identity=null
+            npm run package:mac -- --x64 --config.mac.identity=-
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -159,9 +159,9 @@ jobs:
             export CSC_KEY_PASSWORD='${{ secrets.MAC_CERTIFICATE_PASSWORD }}'
             npm run package:mac -- --arm64
           else
-            echo "::warning::MAC_CERTIFICATE not configured - building unsigned macOS (Apple Silicon) artifacts."
+            echo "::warning::MAC_CERTIFICATE not configured - building ad-hoc signed macOS (Apple Silicon) artifacts (not notarized)."
             export CSC_IDENTITY_AUTO_DISCOVERY=false
-            npm run package:mac -- --arm64 --config.mac.identity=null
+            npm run package:mac -- --arm64 --config.mac.identity=-
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
