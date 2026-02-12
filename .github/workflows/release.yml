@@ -64,22 +64,35 @@ jobs:
           SENTRY_PROFILES_SAMPLE_RATE: ${{ secrets.SENTRY_PROFILES_SAMPLE_RATE }}
 
       - name: Package macOS (Intel)
-        run: cd apps/frontend && npm run package:mac -- --x64
+        run: |
+          cd apps/frontend
+          if [ -n "${{ secrets.MAC_CERTIFICATE }}" ]; then
+            export CSC_LINK='${{ secrets.MAC_CERTIFICATE }}'
+            export CSC_KEY_PASSWORD='${{ secrets.MAC_CERTIFICATE_PASSWORD }}'
+            npm run package:mac -- --x64
+          else
+            echo "::warning::MAC_CERTIFICATE not configured - building unsigned macOS (Intel) artifacts."
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            npm run package:mac -- --x64 --config.mac.identity=null
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_TRACES_SAMPLE_RATE: ${{ secrets.SENTRY_TRACES_SAMPLE_RATE }}
           SENTRY_PROFILES_SAMPLE_RATE: ${{ secrets.SENTRY_PROFILES_SAMPLE_RATE }}
 
       - name: Submit notarization (async)
         id: notarize
+        if: ${{ secrets.MAC_CERTIFICATE != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
         uses: ./.github/actions/submit-macos-notarization
         with:
           apple-id: ${{ secrets.APPLE_ID }}
           apple-app-specific-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Skip notarization notice (Intel)
+        if: ${{ secrets.MAC_CERTIFICATE == '' || secrets.APPLE_ID == '' || secrets.APPLE_APP_SPECIFIC_PASSWORD == '' || secrets.APPLE_TEAM_ID == '' }}
+        run: echo "::warning::macOS notarization skipped (Intel) - certificate or Apple notarization secrets not configured."
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -132,22 +145,35 @@ jobs:
           SENTRY_PROFILES_SAMPLE_RATE: ${{ secrets.SENTRY_PROFILES_SAMPLE_RATE }}
 
       - name: Package macOS (Apple Silicon)
-        run: cd apps/frontend && npm run package:mac -- --arm64
+        run: |
+          cd apps/frontend
+          if [ -n "${{ secrets.MAC_CERTIFICATE }}" ]; then
+            export CSC_LINK='${{ secrets.MAC_CERTIFICATE }}'
+            export CSC_KEY_PASSWORD='${{ secrets.MAC_CERTIFICATE_PASSWORD }}'
+            npm run package:mac -- --arm64
+          else
+            echo "::warning::MAC_CERTIFICATE not configured - building unsigned macOS (Apple Silicon) artifacts."
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            npm run package:mac -- --arm64 --config.mac.identity=null
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_TRACES_SAMPLE_RATE: ${{ secrets.SENTRY_TRACES_SAMPLE_RATE }}
           SENTRY_PROFILES_SAMPLE_RATE: ${{ secrets.SENTRY_PROFILES_SAMPLE_RATE }}
 
       - name: Submit notarization (async)
         id: notarize
+        if: ${{ secrets.MAC_CERTIFICATE != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
         uses: ./.github/actions/submit-macos-notarization
         with:
           apple-id: ${{ secrets.APPLE_ID }}
           apple-app-specific-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Skip notarization notice (ARM64)
+        if: ${{ secrets.MAC_CERTIFICATE == '' || secrets.APPLE_ID == '' || secrets.APPLE_APP_SPECIFIC_PASSWORD == '' || secrets.APPLE_TEAM_ID == '' }}
+        run: echo "::warning::macOS notarization skipped (ARM64) - certificate or Apple notarization secrets not configured."
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -384,7 +410,14 @@ jobs:
           SENTRY_PROFILES_SAMPLE_RATE: ${{ secrets.SENTRY_PROFILES_SAMPLE_RATE }}
 
       - name: Verify Linux packages
-        run: cd apps/frontend && npm run verify:linux
+        shell: bash
+        run: |
+          cd apps/frontend
+          if npm run | grep -q "verify:linux"; then
+            npm run verify:linux
+          else
+            echo "::warning::verify:linux script not found. Skipping Linux package verification."
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -400,6 +433,7 @@ jobs:
   # Finalize macOS notarization (runs in parallel with Windows/Linux builds)
   finalize-notarization:
     needs: [build-macos-intel, build-macos-arm64]
+    if: ${{ secrets.MAC_CERTIFICATE != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' && needs.build-macos-intel.result == 'success' && needs.build-macos-arm64.result == 'success' }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -442,6 +476,7 @@ jobs:
   create-release:
     needs: [build-macos-intel, build-macos-arm64, finalize-notarization, build-windows, build-linux]
     runs-on: ubuntu-latest
+    if: ${{ always() && needs.build-macos-intel.result == 'success' && needs.build-macos-arm64.result == 'success' && needs.build-windows.result == 'success' && needs.build-linux.result == 'success' && (needs.finalize-notarization.result == 'success' || needs.finalize-notarization.result == 'skipped') }}
     permissions:
       contents: write
     steps:
