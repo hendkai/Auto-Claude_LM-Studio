@@ -2148,6 +2148,62 @@ export function getToolInfo(tool: CLITool): ToolDetectionResult {
   return cliToolManager.getToolInfo(tool);
 }
 
+async function detectExternalCliToolAsync(tool: 'codex' | 'kimi'): Promise<ToolDetectionResult> {
+  const label = tool === 'codex' ? 'Codex CLI' : 'Kimi Code CLI';
+  const candidates = isWindows() ? [tool, `${tool}.cmd`, `${tool}.exe`] : [tool];
+
+  for (const candidate of candidates) {
+    const toolPath = await findExecutableAsync(candidate);
+    if (!toolPath) {
+      continue;
+    }
+
+    try {
+      const { stdout, stderr } = await execFileAsync(toolPath, ['--version'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        windowsHide: true,
+        env: await getAugmentedEnvAsync(),
+      });
+
+      const output = `${normalizeExecOutput(stdout)}\n${normalizeExecOutput(stderr)}`.trim();
+      const versionMatch = output.match(/(\d+\.\d+\.\d+(?:[-+][\w.]+)?)/);
+      const version = versionMatch?.[1] || output.split('\n')[0]?.trim();
+
+      return {
+        found: true,
+        path: toolPath,
+        version,
+        source: 'system-path',
+        message: `Using system ${label}: ${toolPath}`,
+      };
+    } catch (error) {
+      return {
+        found: true,
+        path: toolPath,
+        source: 'system-path',
+        message: `Found ${label} at ${toolPath} (version check failed: ${error instanceof Error ? error.message : String(error)})`,
+      };
+    }
+  }
+
+  return {
+    found: false,
+    source: 'fallback',
+    message: `${label} not found in PATH`,
+  };
+}
+
+export async function getToolInfoAsync(
+  tool: CLITool | 'codex' | 'kimi'
+): Promise<ToolDetectionResult> {
+  if (tool === 'codex' || tool === 'kimi') {
+    return detectExternalCliToolAsync(tool);
+  }
+
+  return cliToolManager.getToolInfo(tool);
+}
+
 /**
  * Clear tool path cache manually
  *

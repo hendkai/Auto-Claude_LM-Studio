@@ -11,6 +11,8 @@ export const IPC_CHANNELS = {
   PROJECT_UPDATE_SETTINGS: 'project:updateSettings',
   PROJECT_INITIALIZE: 'project:initialize',
   PROJECT_CHECK_VERSION: 'project:checkVersion',
+  KANBAN_PREFS_GET: 'kanbanPrefs:get',
+  KANBAN_PREFS_SAVE: 'kanbanPrefs:save',
 
   // Tab state operations (persisted in main process)
   TAB_STATE_GET: 'tabState:get',
@@ -27,6 +29,9 @@ export const IPC_CHANNELS = {
   TASK_UPDATE_STATUS: 'task:updateStatus',
   TASK_RECOVER_STUCK: 'task:recoverStuck',
   TASK_CHECK_RUNNING: 'task:checkRunning',
+  TASK_RESUME_PAUSED: 'task:resumePaused',
+  TASK_CHECK_WORKTREE_CHANGES: 'task:checkWorktreeChanges',
+  TASK_LOAD_IMAGE_THUMBNAIL: 'task:loadImageThumbnail',
 
   // Workspace management (for human review)
   // Per-spec architecture: Each spec has its own worktree at .worktrees/{spec-name}/
@@ -43,6 +48,7 @@ export const IPC_CHANNELS = {
   TASK_LIST_WORKTREES: 'task:listWorktrees',
   TASK_WORKTREE_COMMIT_CHANGES: 'task:worktreeCommitChanges',  // Commit uncommitted changes in main project
   TASK_WORKTREE_STASH_CHANGES: 'task:worktreeStashChanges',  // Stash uncommitted changes in main project
+  TASK_WORKTREE_DISCARD_ORPHAN: 'task:worktreeDiscardOrphan',
   TASK_ARCHIVE: 'task:archive',
   TASK_UNARCHIVE: 'task:unarchive',
   TASK_CLEAR_STAGED_STATE: 'task:clearStagedState',
@@ -53,6 +59,7 @@ export const IPC_CHANNELS = {
   TASK_LOG: 'task:log',
   TASK_STATUS_CHANGE: 'task:statusChange',
   TASK_EXECUTION_PROGRESS: 'task:executionProgress',
+  TASK_MERGE_PROGRESS: 'task:mergeProgress',
 
   // Task phase logs (persistent, collapsible logs by phase)
   TASK_LOGS_GET: 'task:logsGet',           // Load logs from spec dir
@@ -70,6 +77,10 @@ export const IPC_CHANNELS = {
   TERMINAL_GENERATE_NAME: 'terminal:generateName',
   TERMINAL_SET_TITLE: 'terminal:setTitle',  // Renderer -> Main: user renamed terminal
   TERMINAL_SET_WORKTREE_CONFIG: 'terminal:setWorktreeConfig',  // Renderer -> Main: worktree association changed
+  TERMINAL_OAUTH_CODE_SUBMIT: 'terminal:oauthCodeSubmit',
+  ACCOUNT_PRIORITY_GET: 'terminal:accountPriorityGet',
+  ACCOUNT_PRIORITY_SET: 'terminal:accountPrioritySet',
+  ALL_PROFILES_USAGE_REQUEST: 'terminal:allProfilesUsageRequest',
 
   // Terminal session management
   TERMINAL_GET_SESSIONS: 'terminal:getSessions',
@@ -101,6 +112,10 @@ export const IPC_CHANNELS = {
   TERMINAL_AUTH_CREATED: 'terminal:authCreated',  // Auth terminal created for OAuth flow
   TERMINAL_CLAUDE_BUSY: 'terminal:claudeBusy',  // Claude Code busy state (for visual indicator)
   TERMINAL_CLAUDE_EXIT: 'terminal:claudeExit',  // Claude Code exited (returned to shell)
+  TERMINAL_OAUTH_CODE_NEEDED: 'terminal:oauthCodeNeeded',
+  TERMINAL_ONBOARDING_COMPLETE: 'terminal:onboardingComplete',
+  TERMINAL_PROFILE_CHANGED: 'terminal:profileChanged',
+  ALL_PROFILES_USAGE_UPDATED: 'terminal:allProfilesUsageUpdated',
 
   // Claude profile management (multi-account support)
   CLAUDE_PROFILES_GET: 'claude:profilesGet',
@@ -115,9 +130,12 @@ export const IPC_CHANNELS = {
   CLAUDE_PROFILE_UPDATE_AUTO_SWITCH: 'claude:updateAutoSwitch',
   CLAUDE_PROFILE_FETCH_USAGE: 'claude:fetchUsage',
   CLAUDE_PROFILE_GET_BEST_PROFILE: 'claude:getBestProfile',
+  CLAUDE_PROFILE_AUTHENTICATE: 'claude:profileAuthenticate',
+  CLAUDE_PROFILE_VERIFY_AUTH: 'claude:profileVerifyAuth',
 
   // SDK/CLI rate limit event (for non-terminal Claude invocations)
   CLAUDE_SDK_RATE_LIMIT: 'claude:sdkRateLimit',
+  CLAUDE_AUTH_FAILURE: 'claude:authFailure',
   // Retry a rate-limited operation with a different profile
   CLAUDE_RETRY_WITH_PROFILE: 'claude:retryWithProfile',
 
@@ -130,6 +148,8 @@ export const IPC_CHANNELS = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
   SETTINGS_GET_CLI_TOOLS_INFO: 'settings:getCliToolsInfo',
+  SETTINGS_CLAUDE_CODE_GET_ONBOARDING_STATUS: 'settings:claudeCodeGetOnboardingStatus',
+  SPELLCHECK_SET_LANGUAGES: 'spellcheck:setLanguages',
 
   // API Profile management (custom Anthropic-compatible endpoints)
   PROFILES_GET: 'profiles:get',
@@ -170,6 +190,9 @@ export const IPC_CHANNELS = {
   ROADMAP_STOP: 'roadmap:stop',
   ROADMAP_UPDATE_FEATURE: 'roadmap:updateFeature',
   ROADMAP_CONVERT_TO_SPEC: 'roadmap:convertToSpec',
+  ROADMAP_PROGRESS_SAVE: 'roadmap:progressSave',
+  ROADMAP_PROGRESS_LOAD: 'roadmap:progressLoad',
+  ROADMAP_PROGRESS_CLEAR: 'roadmap:progressClear',
 
   // Roadmap events (main -> renderer)
   ROADMAP_PROGRESS: 'roadmap:progress',
@@ -227,6 +250,7 @@ export const IPC_CHANNELS = {
   GITHUB_CHECK_CONNECTION: 'github:checkConnection',
   GITHUB_INVESTIGATE_ISSUE: 'github:investigateIssue',
   GITHUB_IMPORT_ISSUES: 'github:importIssues',
+  GITHUB_GET_PULL_REQUESTS: 'github:getPullRequests',
   GITHUB_CREATE_RELEASE: 'github:createRelease',
 
   // GitHub OAuth (gh CLI authentication)
@@ -244,6 +268,7 @@ export const IPC_CHANNELS = {
 
   // GitHub OAuth events (main -> renderer) - for streaming device code during auth
   GITHUB_AUTH_DEVICE_CODE: 'github:authDeviceCode',
+  GITHUB_AUTH_CHANGED: 'github:authChanged',
 
   // GitHub events (main -> renderer)
   GITHUB_INVESTIGATION_PROGRESS: 'github:investigationProgress',
@@ -377,6 +402,7 @@ export const IPC_CHANNELS = {
   GITHUB_PR_REVIEW: 'github:pr:review',
   GITHUB_PR_REVIEW_CANCEL: 'github:pr:reviewCancel',
   GITHUB_PR_GET_REVIEW: 'github:pr:getReview',
+  GITHUB_PR_LIST_MORE: 'github:pr:listMore',
   GITHUB_PR_GET_REVIEWS_BATCH: 'github:pr:getReviewsBatch',  // Batch load reviews for multiple PRs
   GITHUB_PR_POST_REVIEW: 'github:pr:postReview',
   GITHUB_PR_DELETE_REVIEW: 'github:pr:deleteReview',
@@ -394,9 +420,13 @@ export const IPC_CHANNELS = {
   GITHUB_PR_REVIEW_PROGRESS: 'github:pr:reviewProgress',
   GITHUB_PR_REVIEW_COMPLETE: 'github:pr:reviewComplete',
   GITHUB_PR_REVIEW_ERROR: 'github:pr:reviewError',
+  GITHUB_PR_STATUS_POLL_START: 'github:pr:statusPollStart',
+  GITHUB_PR_STATUS_POLL_STOP: 'github:pr:statusPollStop',
+  GITHUB_PR_STATUS_UPDATE: 'github:pr:statusUpdate',
 
   // GitHub PR Logs (for viewing AI review logs)
   GITHUB_PR_GET_LOGS: 'github:pr:getLogs',
+  GITHUB_PR_LOGS_UPDATED: 'github:pr:logsUpdated',
 
   // GitHub PR Memory operations (saves review insights to memory layer)
   GITHUB_PR_MEMORY_GET: 'github:pr:memory:get',        // Get PR review memories
@@ -417,6 +447,17 @@ export const IPC_CHANNELS = {
   GITHUB_TRIAGE_PROGRESS: 'github:triage:progress',
   GITHUB_TRIAGE_COMPLETE: 'github:triage:complete',
   GITHUB_TRIAGE_ERROR: 'github:triage:error',
+
+  // Queue routing operations/events
+  QUEUE_GET_RUNNING_TASKS_BY_PROFILE: 'queue:getRunningTasksByProfile',
+  QUEUE_GET_BEST_PROFILE_FOR_TASK: 'queue:getBestProfileForTask',
+  QUEUE_GET_BEST_UNIFIED_ACCOUNT: 'queue:getBestUnifiedAccount',
+  QUEUE_ASSIGN_PROFILE_TO_TASK: 'queue:assignProfileToTask',
+  QUEUE_UPDATE_TASK_SESSION: 'queue:updateTaskSession',
+  QUEUE_GET_TASK_SESSION: 'queue:getTaskSession',
+  QUEUE_PROFILE_SWAPPED: 'queue:profileSwapped',
+  QUEUE_SESSION_CAPTURED: 'queue:sessionCaptured',
+  QUEUE_BLOCKED_NO_PROFILES: 'queue:blockedNoProfiles',
 
   // Memory Infrastructure status (LadybugDB - no Docker required)
   MEMORY_STATUS: 'memory:status',
@@ -478,13 +519,17 @@ export const IPC_CHANNELS = {
   INSIGHTS_STREAM_CHUNK: 'insights:streamChunk',
   INSIGHTS_STATUS: 'insights:status',
   INSIGHTS_ERROR: 'insights:error',
+  INSIGHTS_SESSION_UPDATED: 'insights:sessionUpdated',
 
   // File explorer operations
   FILE_EXPLORER_LIST: 'fileExplorer:list',
   FILE_EXPLORER_READ: 'fileExplorer:read',
+  SCREENSHOT_GET_SOURCES: 'screenshot:getSources',
+  SCREENSHOT_CAPTURE: 'screenshot:capture',
 
   // Git operations
   GIT_GET_BRANCHES: 'git:getBranches',
+  GIT_GET_BRANCHES_WITH_INFO: 'git:getBranchesWithInfo',
   GIT_GET_CURRENT_BRANCH: 'git:getCurrentBranch',
   GIT_DETECT_MAIN_BRANCH: 'git:detectMainBranch',
   GIT_CHECK_STATUS: 'git:checkStatus',
@@ -503,6 +548,7 @@ export const IPC_CHANNELS = {
   APP_UPDATE_DOWNLOADED: 'app-update:downloaded',
   APP_UPDATE_PROGRESS: 'app-update:progress',
   APP_UPDATE_ERROR: 'app-update:error',
+  APP_UPDATE_READONLY_VOLUME: 'app-update:readonly-volume',
   APP_UPDATE_STABLE_DOWNGRADE: 'app-update:stable-downgrade',  // Stable version available for downgrade from beta
 
   // Release operations
