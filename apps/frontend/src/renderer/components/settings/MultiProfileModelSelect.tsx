@@ -64,10 +64,9 @@ const CLI_MODEL_GROUPS: Array<{
         id: 'kimi-code',
         name: 'Kimi Code CLI',
         models: [
-            { id: 'glm-5.0', display_name: 'GLM-5.0' },
-            { id: 'glm-4.6', display_name: 'GLM-4.6' },
-            { id: 'glm-4.5', display_name: 'GLM-4.5' },
-            { id: 'glm-4.5-air', display_name: 'GLM-4.5-Air' }
+            { id: 'kimi-2.5', display_name: 'Kimi 2.5' },
+            { id: 'kimi-k2', display_name: 'Kimi K2' },
+            { id: 'kimi-k1.5', display_name: 'Kimi K1.5' }
         ],
         checker: async () => window.electronAPI?.checkKimiCodeVersion?.() || { success: false }
     },
