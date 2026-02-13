@@ -11,10 +11,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
 from claude_agent_sdk.types import AssistantMessage, TextBlock
+from core.platform import find_executable, get_binary_directories
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +77,58 @@ class ExternalCLIClient:
             model=self.model or self.cli_tool or "external-cli",
         )
 
+    @staticmethod
+    def _merge_path_entries(existing_path: str, extra_dirs: list[str]) -> str:
+        """Merge path entries while preserving order and removing duplicates."""
+        ordered: list[str] = []
+        seen: set[str] = set()
+
+        for raw_entry in [*extra_dirs, *existing_path.split(os.pathsep)]:
+            entry = raw_entry.strip()
+            if not entry or not os.path.isdir(entry):
+                continue
+            normalized = os.path.normcase(os.path.normpath(entry))
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            ordered.append(entry)
+
+        return os.pathsep.join(ordered)
+
+    def _build_augmented_path(self, current_path: str) -> str:
+        """Augment PATH so external CLIs can find their runtime dependencies."""
+        extra_dirs: list[str] = []
+
+        cli_dir = str(Path(self.cli_path).expanduser().resolve().parent)
+        extra_dirs.append(cli_dir)
+
+        bins = get_binary_directories()
+        extra_dirs.extend(bins.get("user", []))
+        extra_dirs.extend(bins.get("system", []))
+
+        # Codex/OpenCode CLIs are Node-based and may fail with:
+        # `env: node: No such file or directory` when launched from GUI apps
+        # with a minimal PATH.
+        if self.cli_tool in {"codex", "open-code", "opencode"}:
+            node_path = shutil.which("node", path=current_path) or find_executable("node")
+            if node_path:
+                extra_dirs.insert(
+                    0, str(Path(node_path).expanduser().resolve().parent)
+                )
+            else:
+                logger.warning(
+                    "Node executable not found while preparing PATH for external CLI '%s'",
+                    self.cli_tool,
+                )
+
+        merged_path = self._merge_path_entries(current_path, extra_dirs)
+        return merged_path or current_path
+
     def _build_env(self) -> dict[str, str]:
         merged_env = os.environ.copy()
         merged_env.update(self.env)
+        current_path = merged_env.get("PATH", "")
+        merged_env["PATH"] = self._build_augmented_path(current_path)
         return merged_env
 
     async def _run_codex(self, prompt: str) -> str:
@@ -174,6 +225,17 @@ class ExternalCLIClient:
 
     def _format_error(self, return_code: int, stderr: str, stdout: str) -> str:
         detail = (stderr or stdout).strip()
+        detail_lower = detail.lower()
+        if (
+            return_code == 127
+            and self.cli_tool in {"codex", "open-code", "opencode"}
+            and ("env: node: no such file or directory" in detail_lower)
+        ):
+            detail += (
+                "\nHint: Node.js was not found in PATH for the backend process. "
+                "Ensure your Node bin directory (for example /opt/homebrew/bin on macOS) "
+                "is available to Auto-Claude."
+            )
         if len(detail) > 4000:
             detail = detail[:4000] + "\n... (truncated)"
         if not detail:
