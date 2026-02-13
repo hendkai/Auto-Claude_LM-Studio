@@ -27,6 +27,39 @@ from ui import (
 )
 
 
+def _get_phase_subtasks(phase: dict) -> list[dict]:
+    """
+    Get phase subtasks with compatibility for legacy/alternate keys.
+
+    Prefers "subtasks", but if that list is empty, falls back to "chunks" or
+    "tasks". This prevents planner output variants from stalling execution.
+    """
+    subtasks = phase.get("subtasks")
+    if isinstance(subtasks, list) and subtasks:
+        return subtasks
+
+    if isinstance(subtasks, list):
+        chunks = phase.get("chunks")
+        if isinstance(chunks, list) and chunks:
+            return chunks
+
+        tasks = phase.get("tasks")
+        if isinstance(tasks, list) and tasks:
+            return tasks
+
+        return subtasks
+
+    chunks = phase.get("chunks")
+    if isinstance(chunks, list):
+        return chunks
+
+    tasks = phase.get("tasks")
+    if isinstance(tasks, list):
+        return tasks
+
+    return []
+
+
 def count_subtasks(spec_dir: Path) -> tuple[int, int]:
     """
     Count completed and total subtasks in implementation_plan.json.
@@ -50,7 +83,7 @@ def count_subtasks(spec_dir: Path) -> tuple[int, int]:
         completed = 0
 
         for phase in plan.get("phases", []):
-            for subtask in phase.get("subtasks", []):
+            for subtask in _get_phase_subtasks(phase):
                 total += 1
                 if subtask.get("status") == "completed":
                     completed += 1
@@ -85,7 +118,7 @@ def count_subtasks_detailed(spec_dir: Path) -> dict:
             plan = json.load(f)
 
         for phase in plan.get("phases", []):
-            for subtask in phase.get("subtasks", []):
+            for subtask in _get_phase_subtasks(phase):
                 result["total"] += 1
                 status = subtask.get("status", "pending")
                 if status in result:
@@ -187,7 +220,7 @@ def print_progress_summary(spec_dir: Path, show_next: bool = True) -> None:
 
             print("\nPhases:")
             for phase in plan.get("phases", []):
-                phase_subtasks = phase.get("subtasks", [])
+                phase_subtasks = _get_phase_subtasks(phase)
                 phase_completed = sum(
                     1 for s in phase_subtasks if s.get("status") == "completed"
                 )
@@ -207,7 +240,7 @@ def print_progress_summary(spec_dir: Path, show_next: bool = True) -> None:
                     for dep_id in deps:
                         for p in plan.get("phases", []):
                             if p.get("id") == dep_id or p.get("phase") == dep_id:
-                                p_subtasks = p.get("subtasks", [])
+                                p_subtasks = _get_phase_subtasks(p)
                                 if not all(
                                     s.get("status") == "completed" for s in p_subtasks
                                 ):
@@ -327,7 +360,7 @@ def get_plan_summary(spec_dir: Path) -> dict:
                 "total": 0,
             }
 
-            for subtask in phase.get("subtasks", []):
+            for subtask in _get_phase_subtasks(phase):
                 status = subtask.get("status", "pending")
                 summary["total_subtasks"] += 1
                 phase_info["total"] += 1
@@ -380,7 +413,7 @@ def get_current_phase(spec_dir: Path) -> dict | None:
             plan = json.load(f)
 
         for phase in plan.get("phases", []):
-            subtasks = phase.get("subtasks", phase.get("chunks", []))
+            subtasks = _get_phase_subtasks(phase)
             # Phase is current if it has incomplete subtasks and dependencies are met
             has_incomplete = any(s.get("status") != "completed" for s in subtasks)
             if has_incomplete:
@@ -431,7 +464,7 @@ def get_next_subtask(spec_dir: Path) -> dict | None:
             phase_id_key = (
                 str(phase_id_raw) if phase_id_raw is not None else f"unknown:{i}"
             )
-            subtasks = phase.get("subtasks", phase.get("chunks", []))
+            subtasks = _get_phase_subtasks(phase)
             phase_complete[phase_id_key] = all(
                 s.get("status") == "completed" for s in subtasks
             )
@@ -455,9 +488,26 @@ def get_next_subtask(spec_dir: Path) -> dict | None:
             if not deps_satisfied:
                 continue
 
-            # Find first pending subtask in this phase
-            for subtask in phase.get("subtasks", phase.get("chunks", [])):
-                status = subtask.get("status", "pending")
+            phase_subtasks = _get_phase_subtasks(phase)
+
+            # Resume in-progress work before starting a new pending subtask.
+            # Otherwise the agent can stop early after planning if a session
+            # leaves the current subtask in_progress.
+            for subtask in phase_subtasks:
+                status = str(subtask.get("status", "pending")).strip().lower()
+                if status in {"in_progress", "in progress"}:
+                    subtask_out, _changed = normalize_subtask_aliases(subtask)
+                    subtask_out["status"] = "in_progress"
+                    return {
+                        **subtask_out,
+                        "phase_id": phase_id,
+                        "phase_name": phase.get("name"),
+                        "phase_num": phase.get("phase"),
+                    }
+
+            # Otherwise take the first pending subtask in this phase.
+            for subtask in phase_subtasks:
+                status = str(subtask.get("status", "pending")).strip().lower()
                 if status in {"pending", "not_started", "not started"}:
                     subtask_out, _changed = normalize_subtask_aliases(subtask)
                     subtask_out["status"] = "pending"
@@ -467,6 +517,87 @@ def get_next_subtask(spec_dir: Path) -> dict | None:
                         "phase_name": phase.get("name"),
                         "phase_num": phase.get("phase"),
                     }
+
+            # Handle unknown/non-standard not-started states as pending.
+            for subtask in phase_subtasks:
+                status = str(subtask.get("status", "pending")).strip().lower()
+                if status in {"completed", "failed", "blocked"}:
+                    continue
+                if status in {"in_progress", "in progress", "pending", "not_started", "not started"}:
+                    continue
+                subtask_out, _changed = normalize_subtask_aliases(subtask)
+                subtask_out["status"] = "pending"
+                return {
+                    **subtask_out,
+                    "phase_id": phase_id,
+                    "phase_name": phase.get("name"),
+                    "phase_num": phase.get("phase"),
+                }
+
+        # Fallback for malformed dependency graphs:
+        # If no dependency-satisfied subtask is found, prefer continuing an in-progress
+        # subtask, then pick the first pending-like subtask regardless of depends_on.
+        # This prevents deadlocks where planning produced subtasks but none are runnable
+        # due to inconsistent phase IDs in depends_on.
+        for phase in phases:
+            phase_id_value = phase.get("id")
+            phase_id = (
+                phase_id_value if phase_id_value is not None else phase.get("phase")
+            )
+            for subtask in _get_phase_subtasks(phase):
+                status = str(subtask.get("status", "pending")).strip().lower()
+                if status in {"in_progress", "in progress"}:
+                    subtask_out, _changed = normalize_subtask_aliases(subtask)
+                    subtask_out["status"] = "in_progress"
+                    return {
+                        **subtask_out,
+                        "phase_id": phase_id,
+                        "phase_name": phase.get("name"),
+                        "phase_num": phase.get("phase"),
+                    }
+
+        for phase in phases:
+            phase_id_value = phase.get("id")
+            phase_id = (
+                phase_id_value if phase_id_value is not None else phase.get("phase")
+            )
+            for subtask in _get_phase_subtasks(phase):
+                status = str(subtask.get("status", "pending")).strip().lower()
+                if status in {
+                    "pending",
+                    "not_started",
+                    "not started",
+                    "todo",
+                    "to_do",
+                    "backlog",
+                }:
+                    subtask_out, _changed = normalize_subtask_aliases(subtask)
+                    subtask_out["status"] = "pending"
+                    return {
+                        **subtask_out,
+                        "phase_id": phase_id,
+                        "phase_name": phase.get("name"),
+                        "phase_num": phase.get("phase"),
+                    }
+
+        # Last-resort fallback: pick any non-completed/non-blocked/non-failed subtask.
+        for phase in phases:
+            phase_id_value = phase.get("id")
+            phase_id = (
+                phase_id_value if phase_id_value is not None else phase.get("phase")
+            )
+            for subtask in _get_phase_subtasks(phase):
+                status = str(subtask.get("status", "pending")).strip().lower()
+                if status in {"completed", "failed", "blocked"}:
+                    continue
+                subtask_out, _changed = normalize_subtask_aliases(subtask)
+                subtask_out["status"] = "pending"
+                return {
+                    **subtask_out,
+                    "phase_id": phase_id,
+                    "phase_name": phase.get("name"),
+                    "phase_num": phase.get("phase"),
+                }
 
         return None
 

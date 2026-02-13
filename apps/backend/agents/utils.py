@@ -15,6 +15,29 @@ from core.git_executable import run_git
 logger = logging.getLogger(__name__)
 
 
+def _get_phase_subtasks(phase: dict) -> list[dict]:
+    """Return phase subtasks with fallback to legacy aliases."""
+    subtasks = phase.get("subtasks")
+    if isinstance(subtasks, list) and subtasks:
+        return subtasks
+    if isinstance(subtasks, list):
+        chunks = phase.get("chunks")
+        if isinstance(chunks, list) and chunks:
+            return chunks
+        tasks = phase.get("tasks")
+        if isinstance(tasks, list) and tasks:
+            return tasks
+        return subtasks
+
+    chunks = phase.get("chunks")
+    if isinstance(chunks, list):
+        return chunks
+    tasks = phase.get("tasks")
+    if isinstance(tasks, list):
+        return tasks
+    return []
+
+
 def get_latest_commit(project_dir: Path) -> str | None:
     """Get the hash of the latest git commit."""
     result = run_git(
@@ -57,7 +80,7 @@ def load_implementation_plan(spec_dir: Path) -> dict | None:
 def find_subtask_in_plan(plan: dict, subtask_id: str) -> dict | None:
     """Find a subtask by ID in the plan."""
     for phase in plan.get("phases", []):
-        for subtask in phase.get("subtasks", []):
+        for subtask in _get_phase_subtasks(phase):
             if subtask.get("id") == subtask_id:
                 return subtask
     return None
@@ -66,7 +89,7 @@ def find_subtask_in_plan(plan: dict, subtask_id: str) -> dict | None:
 def find_phase_for_subtask(plan: dict, subtask_id: str) -> dict | None:
     """Find the phase containing a subtask."""
     for phase in plan.get("phases", []):
-        for subtask in phase.get("subtasks", []):
+        for subtask in _get_phase_subtasks(phase):
             if subtask.get("id") == subtask_id:
                 return phase
     return None

@@ -235,8 +235,52 @@ async def post_session_processing(
         return True
 
     elif subtask_status == "in_progress":
-        # Session ended without completion
+        # Session ended without fully completing the current subtask.
         print_status(f"Subtask {subtask_id} still in progress", "warning")
+
+        # If there was no explicit session error, keep this as normal progress and
+        # continue next iteration instead of escalating recovery immediately.
+        if not error_info:
+            print_status(
+                f"Continuing subtask {subtask_id} in next session (no session error)",
+                "info",
+            )
+
+            if commit_after and commit_after != commit_before:
+                recovery_manager.record_good_commit(commit_after, subtask_id)
+                print_status(
+                    f"Recorded partial progress commit: {commit_after[:8]}", "info"
+                )
+
+            try:
+                extracted_insights = await extract_session_insights(
+                    spec_dir=spec_dir,
+                    project_dir=project_dir,
+                    subtask_id=subtask_id,
+                    session_num=session_num,
+                    commit_before=commit_before,
+                    commit_after=commit_after,
+                    success=False,
+                    recovery_manager=recovery_manager,
+                )
+            except Exception as e:
+                logger.debug(f"Insight extraction failed for incomplete session: {e}")
+                extracted_insights = None
+
+            try:
+                await save_session_memory(
+                    spec_dir=spec_dir,
+                    project_dir=project_dir,
+                    subtask_id=subtask_id,
+                    session_num=session_num,
+                    success=False,
+                    subtasks_completed=[],
+                    discoveries=extracted_insights,
+                )
+            except Exception as e:
+                logger.debug(f"Failed to save incomplete session memory: {e}")
+
+            return False
 
         recovery_manager.record_attempt(
             subtask_id=subtask_id,
@@ -247,9 +291,7 @@ async def post_session_processing(
         )
 
         # Check if this was a concurrency error - if so, reset subtask to pending for retry
-        is_concurrency_error = (
-            error_info and error_info.get("type") == "tool_concurrency"
-        )
+        is_concurrency_error = error_info.get("type") == "tool_concurrency"
 
         if is_concurrency_error:
             print_status(
@@ -266,7 +308,8 @@ async def post_session_processing(
                 # Find and reset the subtask
                 subtask_found = False
                 for phase in plan.get("phases", []):
-                    for subtask in phase.get("subtasks", []):
+                    phase_subtasks = phase.get("subtasks") or phase.get("chunks", [])
+                    for subtask in phase_subtasks:
                         if subtask.get("id") == subtask_id:
                             # Reset subtask to pending state
                             subtask["status"] = "pending"
@@ -301,11 +344,7 @@ async def post_session_processing(
                 )
         else:
             # Non-rate-limit error - use automatic recovery flow
-            error_message = (
-                error_info.get("message", "Subtask not marked as completed")
-                if error_info
-                else "Subtask not marked as completed"
-            )
+            error_message = error_info.get("message", "Subtask not marked as completed")
 
             recovery_action = check_and_recover(
                 spec_dir=spec_dir,

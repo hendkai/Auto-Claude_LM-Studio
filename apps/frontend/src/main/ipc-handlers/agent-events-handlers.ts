@@ -22,7 +22,7 @@ import { titleGenerator } from "../title-generator";
 import { fileWatcher } from "../file-watcher";
 import { projectStore } from "../project-store";
 import { notificationService } from "../notification-service";
-import { persistPlanStatus, getPlanPath } from "./task/plan-file-utils";
+import { persistPlanStatus, getPlanPath, updatePlanFile } from "./task/plan-file-utils";
 import { findTaskWorktree } from "../worktree-paths";
 import { findTaskAndProject } from "./task/shared";
 import { safeSendToRenderer } from "./utils";
@@ -113,6 +113,9 @@ export function registerAgenteventsHandlers(
 
   // Cache last persisted status to debounce updates and prevent IO saturation
   const lastTaskStatus = new Map<string, TaskStatus>();
+  // Prevent infinite restart loops when a process exits right after planning.
+  const autoResumeAttempts = new Map<string, number>();
+  const MAX_AUTO_RESUME_ATTEMPTS = 1;
 
   agentManager.on("log", (taskId: string, log: string) => {
     // Include projectId for multi-project filtering (issue #723)
@@ -235,7 +238,10 @@ export function registerAgenteventsHandlers(
 
         // Use shared utility for persisting status (prevents race conditions)
         // Persist to both main project AND worktree (if exists) for consistency
-        const persistStatus = async (status: TaskStatus) => {
+        const persistStatus = async (
+          status: TaskStatus,
+          reviewReason?: "completed" | "errors" | "plan_review" | "qa_rejected"
+        ) => {
           try {
             // Persist to main project
             // Use async persistPlanStatus which uses locks, preventing race conditions with TASK_UPDATE_STATUS
@@ -243,6 +249,15 @@ export function registerAgenteventsHandlers(
             if (mainPersisted) {
               console.warn(`[Task ${taskId}] Persisted status to main plan: ${status}`);
             }
+            await updatePlanFile<Record<string, unknown>>(mainPlanPath, (plan) => {
+              const next = { ...plan };
+              if (status === "human_review" && reviewReason) {
+                next.reviewReason = reviewReason;
+              } else {
+                delete next.reviewReason;
+              }
+              return next;
+            });
           } catch (mainPersistError) {
             console.error(`[Task ${taskId}] Failed to persist status to main plan:`, mainPersistError);
           }
@@ -263,6 +278,15 @@ export function registerAgenteventsHandlers(
               if (worktreePersisted) {
                 console.warn(`[Task ${taskId}] Persisted status to worktree plan: ${status}`);
               }
+              await updatePlanFile<Record<string, unknown>>(worktreePlanPath, (plan) => {
+                const next = { ...plan };
+                if (status === "human_review" && reviewReason) {
+                  next.reviewReason = reviewReason;
+                } else {
+                  delete next.reviewReason;
+                }
+                return next;
+              });
             }
           } catch (worktreePersistError) {
             console.error(`[Task ${taskId}] Failed to persist status to worktree plan:`, worktreePersistError);
@@ -284,29 +308,76 @@ export function registerAgenteventsHandlers(
           const hasSubtasks = task.subtasks && task.subtasks.length > 0;
           const hasIncompleteSubtasks = hasSubtasks &&
             task.subtasks.some((s) => s.status !== 'completed');
+          const completedSubtasks = hasSubtasks
+            ? task.subtasks.filter((s) => s.status === 'completed').length
+            : 0;
 
           if (isActiveStatus && hasSubtasks && !hasIncompleteSubtasks) {
+            autoResumeAttempts.delete(taskId);
             // All subtasks completed - safe to move to human_review
             console.warn(`[Task ${taskId}] Fallback: Moving to human_review (process exited successfully, all ${task.subtasks.length} subtasks completed)`);
             try {
-              await persistStatus('human_review');
+              await persistStatus('human_review', 'completed');
               // Include projectId for multi-project filtering (issue #723)
               safeSendToRenderer(
                 getMainWindow,
                 IPC_CHANNELS.TASK_STATUS_CHANGE,
                 taskId,
                 'human_review' as TaskStatus,
-                projectId
+                projectId,
+                "completed"
               );
             } catch (statusUpdateError) {
               console.error(`[Task ${taskId}] Failed to update status to human_review:`, statusUpdateError);
             }
+          } else if (
+            isActiveStatus &&
+            hasSubtasks &&
+            hasIncompleteSubtasks &&
+            completedSubtasks === 0 &&
+            task.metadata?.requireReviewBeforeCoding !== true
+          ) {
+            const attempts = autoResumeAttempts.get(taskId) ?? 0;
+            if (attempts < MAX_AUTO_RESUME_ATTEMPTS) {
+              autoResumeAttempts.set(taskId, attempts + 1);
+              console.warn(
+                `[Task ${taskId}] Planning finished but coding did not start (0/${task.subtasks.length}). Auto-resuming implementation (attempt ${attempts + 1}/${MAX_AUTO_RESUME_ATTEMPTS})`
+              );
+              try {
+                const baseBranch = task.metadata?.baseBranch || project.settings?.mainBranch;
+                await agentManager.startTaskExecution(
+                  taskId,
+                  project.path,
+                  task.specId,
+                  {
+                    parallel: false,
+                    workers: 1,
+                    baseBranch,
+                    useWorktree: task.metadata?.useWorktree,
+                    metadata: task.metadata
+                  }
+                );
+                await persistStatus('in_progress');
+                safeSendToRenderer(
+                  getMainWindow,
+                  IPC_CHANNELS.TASK_STATUS_CHANGE,
+                  taskId,
+                  'in_progress' as TaskStatus,
+                  projectId
+                );
+                return;
+              } catch (resumeError) {
+                console.error(`[Task ${taskId}] Auto-resume failed:`, resumeError);
+              }
+            }
           } else if (isActiveStatus && !hasSubtasks) {
+            autoResumeAttempts.delete(taskId);
             // No subtasks yet - task is still in planning phase, don't change status
             // This prevents the bug where tasks jump to human_review before planning completes
             console.warn(`[Task ${taskId}] Process exited but no subtasks created yet - keeping current status (${task.status})`);
           }
         } else {
+          autoResumeAttempts.delete(taskId);
           // Process failed (non-zero exit code)
           try {
             notificationService.notifyTaskFailed(taskTitle, project.id, taskId);
@@ -315,14 +386,15 @@ export function registerAgenteventsHandlers(
           }
 
           try {
-            await persistStatus('human_review');
+            await persistStatus('human_review', "errors");
             // Include projectId for multi-project filtering (issue #723)
             safeSendToRenderer(
               getMainWindow,
               IPC_CHANNELS.TASK_STATUS_CHANGE,
               taskId,
               'human_review' as TaskStatus,
-              projectId
+              projectId,
+              "errors"
             );
           } catch (statusUpdateError) {
             console.error(`[Task ${taskId}] Failed to update status after failure:`, statusUpdateError);
@@ -377,7 +449,20 @@ export function registerAgenteventsHandlers(
         failed: "human_review",
       };
 
-      const newStatus = phaseToStatus[progress.phase];
+      let newStatus = phaseToStatus[progress.phase];
+      let reviewReason: "completed" | "errors" | undefined;
+      // Guard against premature "complete" when subtasks are not actually done.
+      if (progress.phase === "complete" && task) {
+        const totalSubtasks = task.subtasks?.length ?? 0;
+        const completedSubtasks = task.subtasks?.filter((s) => s.status === "completed").length ?? 0;
+        if (totalSubtasks === 0 || completedSubtasks < totalSubtasks) {
+          newStatus = "in_progress";
+        } else {
+          reviewReason = "completed";
+        }
+      } else if (progress.phase === "failed") {
+        reviewReason = "errors";
+      }
       // FIX (ACS-55, ACS-71): Validate status transition before sending/persisting
       if (newStatus && validateStatusTransition(task, newStatus, progress.phase)) {
         // Include projectId in status change event for multi-project filtering
@@ -386,7 +471,8 @@ export function registerAgenteventsHandlers(
           IPC_CHANNELS.TASK_STATUS_CHANGE,
           taskId,
           newStatus,
-          taskProjectId
+          taskProjectId,
+          reviewReason
         );
 
         // PERFORMANCE FIX: Debounce status updates

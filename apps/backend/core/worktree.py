@@ -178,9 +178,18 @@ class WorktreeManager:
     GH_CLI_TIMEOUT = 60  # 1 minute for gh CLI commands
     GH_QUERY_TIMEOUT = 30  # 30 seconds for gh CLI queries
 
-    def __init__(self, project_dir: Path, base_branch: str | None = None):
+    def __init__(
+        self,
+        project_dir: Path,
+        base_branch: str | None = None,
+        use_local_branch: bool = False,
+    ):
         self.project_dir = project_dir
         self.base_branch = base_branch or self._detect_base_branch()
+        # When enabled, start worktrees from the local branch instead of origin/<branch>.
+        # This preserves local-only state (for example gitignored config files) that may
+        # not exist on the remote branch yet.
+        self.use_local_branch = use_local_branch
         self.worktrees_dir = project_dir / ".auto-claude" / "worktrees" / "tasks"
         self._merge_lock = asyncio.Lock()
 
@@ -516,29 +525,32 @@ class WorktreeManager:
             self._run_git(["worktree", "prune"])
             self._run_git(["branch", "-D", branch_name])
 
-        # Fetch latest from remote to ensure we have the most up-to-date code
-        # GitHub/remote is the source of truth, not the local branch
-        fetch_result = self._run_git(["fetch", "origin", self.base_branch])
-        if fetch_result.returncode != 0:
-            print(
-                f"Warning: Could not fetch {self.base_branch} from origin: {fetch_result.stderr}"
-            )
-            print("Falling back to local branch...")
-
-        # Determine the start point for the worktree
-        # Prefer origin/{base_branch} (remote) over local branch to ensure we have latest code
-        remote_ref = f"origin/{self.base_branch}"
-        start_point = self.base_branch  # Default to local branch
-
-        # Check if remote ref exists and use it as the source of truth
-        check_remote = self._run_git(["rev-parse", "--verify", remote_ref])
-        if check_remote.returncode == 0:
-            start_point = remote_ref
-            print(f"Creating worktree from remote: {remote_ref}")
+        # Determine the start point for the worktree.
+        # Default behavior prefers origin/<base_branch> for freshest remote state.
+        # Optional local mode starts directly from <base_branch>.
+        start_point = self.base_branch
+        if self.use_local_branch:
+            print(f"Creating worktree from local branch: {self.base_branch}")
         else:
-            print(
-                f"Remote ref {remote_ref} not found, using local branch: {self.base_branch}"
-            )
+            # Fetch latest from remote to ensure we have the most up-to-date code
+            fetch_result = self._run_git(["fetch", "origin", self.base_branch])
+            if fetch_result.returncode != 0:
+                print(
+                    f"Warning: Could not fetch {self.base_branch} from origin: {fetch_result.stderr}"
+                )
+                print("Falling back to local branch...")
+
+            remote_ref = f"origin/{self.base_branch}"
+
+            # Check if remote ref exists and use it as the source of truth
+            check_remote = self._run_git(["rev-parse", "--verify", remote_ref])
+            if check_remote.returncode == 0:
+                start_point = remote_ref
+                print(f"Creating worktree from remote: {remote_ref}")
+            else:
+                print(
+                    f"Remote ref {remote_ref} not found, using local branch: {self.base_branch}"
+                )
 
         # Create worktree with new branch from the start point (remote preferred)
         result = self._run_git(

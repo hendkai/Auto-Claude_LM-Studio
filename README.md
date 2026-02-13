@@ -243,6 +243,8 @@ All releases are:
 | `npm run install:all` | Install backend and frontend dependencies |
 | `npm start` | Build and run the desktop app |
 | `npm run dev` | Run in development mode with hot reload |
+| `npm run dev:lan` | Run dev mode and expose renderer on LAN (`http://<your-ip>:5173`) |
+| `npm run dev:lan:web` | Run renderer-only LAN mode for browser testing |
 | `npm run package` | Package for current platform |
 | `npm run package:mac` | Package for macOS |
 | `npm run package:win` | Package for Windows |
@@ -285,5 +287,3 @@ We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for:
 Auto Claude is free to use. If you modify and distribute it, or run it as a service, your code must also be open source under AGPL-3.0.
 
 Commercial licensing available for closed-source use cases.
-
-

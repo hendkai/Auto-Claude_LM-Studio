@@ -118,6 +118,8 @@ src/
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Start development server with hot reload |
+| `npm run dev:lan` | Start dev mode and expose renderer on LAN (`http://<your-ip>:5173`) |
+| `npm run dev:lan:web` | Start renderer-only LAN mode for browser testing |
 | `npm run build` | Build for production |
 | `npm run package` | Build and package for current platform |
 | `npm run package:win` | Package for Windows |

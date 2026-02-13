@@ -21,6 +21,10 @@ const sentryDefines = {
   '__SENTRY_PROFILES_SAMPLE_RATE__': JSON.stringify(process.env.SENTRY_PROFILES_SAMPLE_RATE || '0.1'),
 };
 
+const lanModeEnabled = process.env.ELECTRON_VITE_LAN === '1';
+const rendererHost = process.env.ELECTRON_VITE_RENDERER_HOST || (lanModeEnabled ? '0.0.0.0' : '127.0.0.1');
+const rendererPort = Number.parseInt(process.env.ELECTRON_VITE_RENDERER_PORT || '5173', 10);
+
 export default defineConfig({
   main: {
     define: sentryDefines,
@@ -94,6 +98,11 @@ export default defineConfig({
       }
     },
     server: {
+      host: rendererHost,
+      port: Number.isNaN(rendererPort) ? 5173 : rendererPort,
+      strictPort: true,
+      // In LAN mode allow access via local hostname/IP from other machines.
+      allowedHosts: lanModeEnabled ? true : undefined,
       watch: {
         // Ignore directories to prevent HMR conflicts during merge operations
         // Using absolute paths and broader patterns

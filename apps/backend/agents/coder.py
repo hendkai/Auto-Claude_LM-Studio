@@ -680,8 +680,47 @@ async def run_autonomous_agent(
                         )
 
                 if not next_subtask:
-                    print("No pending subtasks found - build may be complete!")
-                    break
+                    completed, total = count_subtasks(spec_dir)
+
+                    # Guard against false "complete" state: if subtasks remain but none
+                    # are runnable, try auto-fixing the implementation plan once.
+                    if total > 0 and completed < total:
+                        print_status(
+                            f"No runnable subtask found ({completed}/{total} completed) - attempting plan auto-fix",
+                            "warning",
+                        )
+                        valid, errors = _validate_and_fix_implementation_plan()
+                        if valid:
+                            next_subtask = get_next_subtask(spec_dir)
+                            if next_subtask:
+                                subtask_id = next_subtask.get("id")
+                                phase_name = next_subtask.get("phase_name")
+                                print_status(
+                                    f"Recovered next subtask: {subtask_id}", "success"
+                                )
+                        else:
+                            print_status(
+                                "Implementation plan is invalid and no subtask can be resumed",
+                                "error",
+                            )
+                            for err in errors:
+                                print(f"  - {err}")
+                            status_manager.update(state=BuildState.ERROR)
+                            emit_phase(
+                                ExecutionPhase.FAILED,
+                                "Implementation plan invalid with remaining subtasks",
+                            )
+                            return
+
+                    if not next_subtask:
+                        if total > 0 and completed < total:
+                            print_status(
+                                "No runnable subtasks available even though work remains; pausing build for manual review",
+                                "warning",
+                            )
+                        else:
+                            print("No pending subtasks found - build may be complete!")
+                        break
 
             # Validate that all files_to_modify exist before attempting execution
             # This prevents infinite retry loops when implementation plan references non-existent files

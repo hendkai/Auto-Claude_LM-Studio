@@ -21,6 +21,8 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.cjs",
     "dev": "electron-vite dev",
+    "dev:lan": "cross-env ELECTRON_VITE_LAN=1 electron-vite dev",
+    "dev:lan:web": "cross-env ELECTRON_VITE_LAN=1 electron-vite dev --rendererOnly",
     "dev:debug": "cross-env DEBUG=true electron-vite dev",
     "dev:mcp": "electron-vite dev -- --remote-debugging-port=9222",
     "build": "electron-vite build",
