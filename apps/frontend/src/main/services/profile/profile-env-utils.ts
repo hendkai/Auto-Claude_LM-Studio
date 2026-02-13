@@ -54,6 +54,43 @@ export function hasProviderAuthInConfig(config: PhaseProviderEnvConfig | null | 
 
     return PHASE_KEYS.some((phase) => config[phase].some((entry) => hasProviderAuthEnv(entry.env)));
 }
+
+function isModelCompatibleWithOAuthProfile(model: string): boolean {
+    const normalizedModel = model.trim().toLowerCase();
+    if (!normalizedModel) {
+        return false;
+    }
+
+    if (normalizedModel.startsWith('glm') || normalizedModel.startsWith('kimi')) {
+        return false;
+    }
+
+    if (normalizedModel === 'codex' || normalizedModel === 'open-code' || normalizedModel === 'opencode') {
+        return false;
+    }
+
+    return true;
+}
+
+function isModelCompatibleWithApiProfile(model: string, profile: APIProfile): boolean {
+    const normalizedModel = model.trim().toLowerCase();
+    if (!normalizedModel) {
+        return false;
+    }
+
+    const normalizedBaseUrl = normalizeBaseUrlForSdk(profile.baseUrl || '');
+    if (!normalizedBaseUrl) {
+        // Without an explicit API endpoint, avoid routing non-Claude models.
+        return !normalizedModel.startsWith('glm') &&
+            !normalizedModel.startsWith('kimi') &&
+            normalizedModel !== 'codex' &&
+            normalizedModel !== 'open-code' &&
+            normalizedModel !== 'opencode';
+    }
+
+    return isModelLikelyCompatibleWithBaseUrl(model, normalizedBaseUrl);
+}
+
 export async function getProfileEnvForPair(
     pair: ProfileModelPair
 ): Promise<Record<string, string>> {
@@ -92,15 +129,26 @@ async function getOAuthProfileEnv(
     claudeProfileId: string,
     model: string
 ): Promise<Record<string, string>> {
+    if (!isModelCompatibleWithOAuthProfile(model)) {
+        console.warn(
+            `[ProfileEnv] Skipping OAuth profile ${claudeProfileId}: model '${model}' is not OAuth-compatible`
+        );
+        return {};
+    }
+
     const profileManager = getClaudeProfileManager();
 
     try {
         // Return env for the explicitly selected OAuth account.
         // Do not mutate global active profile here.
         const profileEnv = profileManager.getProfileEnv(claudeProfileId);
+        const normalizedModel = normalizeModelForProvider(
+            model,
+            profileEnv.ANTHROPIC_BASE_URL || ''
+        );
         return {
             ...profileEnv,
-            ANTHROPIC_MODEL: model,
+            ANTHROPIC_MODEL: normalizedModel,
         };
     } catch (err) {
         console.error(`[ProfileEnv] Failed to resolve OAuth profile ${claudeProfileId}:`, err);
@@ -175,16 +223,25 @@ async function getAPIProfileEnvById(
         return {};
     }
 
+    if (!isModelCompatibleWithApiProfile(model, profile)) {
+        console.warn(
+            `[ProfileEnv] Skipping API profile ${apiProfileId}: model '${model}' is incompatible with base URL '${profile.baseUrl || ''}'`
+        );
+        return {};
+    }
+
     return buildAPIProfileEnv(profile, model);
 }
 
 function buildAPIProfileEnv(profile: APIProfile, model: string): Record<string, string> {
+    const normalizedModel = normalizeModelForProvider(model, profile.baseUrl || '');
+
     // Build environment variables
     const envVars: Record<string, string> = {
         ANTHROPIC_BASE_URL: normalizeBaseUrlForSdk(profile.baseUrl || ''),
         ANTHROPIC_AUTH_TOKEN: profile.apiKey || '',
         ANTHROPIC_API_KEY: profile.apiKey || '', // redundancy
-        ANTHROPIC_MODEL: model, // Use model from ProfileModelPair, not profile default
+        ANTHROPIC_MODEL: normalizedModel, // Use model from ProfileModelPair, normalized for provider
         ANTHROPIC_DEFAULT_HAIKU_MODEL: profile.models?.haiku || '',
         ANTHROPIC_DEFAULT_SONNET_MODEL: profile.models?.sonnet || '',
         ANTHROPIC_DEFAULT_OPUS_MODEL: profile.models?.opus || '',
@@ -235,6 +292,33 @@ function isModelLikelyCompatibleWithBaseUrl(model: string, baseUrl: string): boo
     return true;
 }
 
+function normalizeModelForProvider(model: string, baseUrl: string): string {
+    const trimmedModel = model.trim();
+    const normalizedModel = trimmedModel.toLowerCase();
+    const normalizedBaseUrl = (baseUrl || '').toLowerCase();
+    const isGlmProvider =
+        normalizedBaseUrl.includes('z.ai') ||
+        normalizedBaseUrl.includes('bigmodel.cn');
+
+    // Normalize common provider IDs to lower-case for compatibility.
+    if (
+        normalizedModel.startsWith('glm') ||
+        normalizedModel.startsWith('kimi') ||
+        normalizedModel.startsWith('claude-')
+    ) {
+        // z.ai anthropic-compatible endpoint uses `glm-5` (without `.0`).
+        if (
+            isGlmProvider &&
+            (normalizedModel === 'glm5' || normalizedModel === 'glm-5.0')
+        ) {
+            return 'glm-5';
+        }
+        return normalizedModel;
+    }
+
+    return trimmedModel;
+}
+
 async function getFirstMatchingAPIProfileEnv(
     model: string,
     baseUrlHints: string[]
@@ -283,6 +367,8 @@ async function getCLIProfileEnv(
     model: string
 ): Promise<Record<string, string>> {
     try {
+        const normalizedModel = normalizeModelForProvider(model, '');
+
         if (cliToolId === 'claude-code') {
             const profileManager = getClaudeProfileManager();
             const activeProfileEnv = profileManager.getActiveProfileEnv();
@@ -291,7 +377,7 @@ async function getCLIProfileEnv(
             }
             return {
                 ...activeProfileEnv,
-                ANTHROPIC_MODEL: model,
+                ANTHROPIC_MODEL: normalizedModel,
             };
         }
 
@@ -300,7 +386,7 @@ async function getCLIProfileEnv(
             if (kimiCliPath) {
                 return {
                     CLAUDE_CLI_PATH: kimiCliPath,
-                    ANTHROPIC_MODEL: model,
+                    ANTHROPIC_MODEL: normalizedModel,
                     [CLI_PROVIDER_KIND_KEY]: CLI_PROVIDER_KIND,
                     [CLI_PROVIDER_TOOL_KEY]: 'kimi-code'
                 };
@@ -314,7 +400,7 @@ async function getCLIProfileEnv(
             if (codexCliPath) {
                 return {
                     CLAUDE_CLI_PATH: codexCliPath,
-                    ANTHROPIC_MODEL: model,
+                    ANTHROPIC_MODEL: normalizedModel,
                     [CLI_PROVIDER_KIND_KEY]: CLI_PROVIDER_KIND,
                     [CLI_PROVIDER_TOOL_KEY]: 'codex'
                 };
@@ -373,12 +459,16 @@ export async function buildPhaseProviderEnvConfig(
                 if (!env || Object.keys(env).length === 0) {
                     continue;
                 }
+                const normalizedModel = normalizeModelForProvider(
+                    pair.model,
+                    env.ANTHROPIC_BASE_URL || ''
+                );
                 config[phase].push({
                     profileId: pair.profileId.trim(),
-                    model: pair.model.trim(),
+                    model: normalizedModel,
                     env: {
                         ...env,
-                        ANTHROPIC_MODEL: pair.model.trim()
+                        ANTHROPIC_MODEL: normalizedModel
                     }
                 });
             } catch (error) {

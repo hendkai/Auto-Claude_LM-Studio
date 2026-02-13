@@ -329,6 +329,76 @@ def _entry_has_auth(entry_env: dict[str, Any]) -> bool:
     return False
 
 
+def _is_model_compatible_with_entry(model: str, entry_env: dict[str, Any]) -> bool:
+    """
+    Validate that a model can plausibly run on the provider represented by entry_env.
+
+    This prevents selecting an OAuth Claude account for non-Claude models such as
+    GLM/Kimi when a later fallback entry is the actual matching provider.
+    """
+    normalized_model = model.strip().lower()
+    if not normalized_model:
+        return False
+
+    provider_kind = str(entry_env.get(PHASE_PROVIDER_KIND_KEY, "")).strip().lower()
+    cli_tool = str(entry_env.get(PHASE_PROVIDER_CLI_TOOL_KEY, "")).strip().lower()
+    base_url = str(entry_env.get("ANTHROPIC_BASE_URL", "")).strip().lower()
+
+    if provider_kind == PHASE_PROVIDER_CLI_KIND:
+        if cli_tool == "kimi-code":
+            return normalized_model.startswith("kimi")
+        if cli_tool == "codex":
+            return not (
+                normalized_model.startswith("glm")
+                or normalized_model.startswith("kimi")
+                or normalized_model.startswith("claude-")
+            )
+        if cli_tool == "claude-code":
+            return not (
+                normalized_model.startswith("glm")
+                or normalized_model.startswith("kimi")
+                or normalized_model in {"codex", "open-code", "opencode"}
+            )
+        return True
+
+    # API/OAuth providers
+    if normalized_model.startswith("glm"):
+        return "z.ai" in base_url or "bigmodel.cn" in base_url
+
+    if normalized_model.startswith("kimi"):
+        return "moonshot.ai" in base_url or "moonshot.cn" in base_url
+
+    if normalized_model in {"codex", "open-code", "opencode"}:
+        return False
+
+    return True
+
+
+def _normalize_model_for_entry(model: str, entry_env: dict[str, Any]) -> str:
+    """
+    Normalize model aliases for provider-specific compatibility.
+    """
+    normalized_model = model.strip()
+    normalized_model_lower = normalized_model.lower()
+    base_url = str(entry_env.get("ANTHROPIC_BASE_URL", "")).strip().lower()
+    is_glm_provider = "z.ai" in base_url or "bigmodel.cn" in base_url
+
+    # Normalize common provider model IDs to lower-case for API compatibility.
+    if normalized_model_lower.startswith(("glm", "kimi", "claude-")):
+        normalized_model = normalized_model_lower
+
+    # z.ai anthropic-compatible endpoint uses `glm-5` (without `.0`).
+    if is_glm_provider and normalized_model_lower in {"glm5", "glm-5.0"}:
+        logger.info(
+            "Normalizing model alias '%s' to 'glm-5' for provider '%s'",
+            model,
+            base_url or "unknown",
+        )
+        return "glm-5"
+
+    return normalized_model
+
+
 def _reset_phase_provider_env() -> None:
     for key in PHASE_PROVIDER_RESET_KEYS:
         os.environ.pop(key, None)
@@ -369,8 +439,15 @@ def apply_phase_provider_env(phase: Phase) -> bool:
             continue
         if not _entry_has_auth(entry_env):
             continue
+        if not _is_model_compatible_with_entry(model, entry_env):
+            logger.debug(
+                "Skipping incompatible phase provider entry for phase '%s': model='%s'",
+                phase,
+                model,
+            )
+            continue
 
-        selected_model = model.strip()
+        selected_model = _normalize_model_for_entry(model, entry_env)
         selected_env = {
             key: value.strip()
             for key, value in entry_env.items()
