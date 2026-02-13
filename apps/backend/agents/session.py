@@ -246,6 +246,16 @@ async def post_session_processing(
                 "info",
             )
 
+            # Keep attempt history for visibility/analytics even when we
+            # intentionally continue in the next session without recovery.
+            recovery_manager.record_attempt(
+                subtask_id=subtask_id,
+                session=session_num,
+                success=False,
+                approach="Session ended with subtask in_progress (continuing)",
+                error="Subtask still in progress",
+            )
+
             if commit_after and commit_after != commit_before:
                 recovery_manager.record_good_commit(commit_after, subtask_id)
                 print_status(
