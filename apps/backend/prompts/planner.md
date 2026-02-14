@@ -876,6 +876,17 @@ Before creating implementation_plan.json, verify you have completed these steps:
 - [ ] Identified the tech stack and frameworks in use
 - [ ] Found configuration files (settings, config, .env)
 
+### File Path Naming Rules (CRITICAL)
+When specifying files_to_modify and files_to_create, you MUST use the ACTUAL directory names found in the project:
+
+1. **Use real directory names from `ls -la`**: Never invent project names (e.g., don't use "SnailMail/" if the actual directory is "SmartMailTaggerHost/")
+2. **Match case exactly**: Use the exact casing as shown in directory listings
+3. **Verify paths exist**: Before referencing a path, confirm it exists via `ls` or `find`
+4. **Examples of WRONG paths**: `SnailMail/ContentView.swift`, `MyApp/src/main.py` (if directory doesn't exist)
+5. **Examples of CORRECT paths**: `SmartMailTaggerHost/ContentView.swift`, `src/models/user.py` (verified via ls)
+
+**ALWAYS run**: `find . -type d -maxdepth 2 | head -20` to see actual directory structure before creating file paths.
+
 ### Context Files Checklist
 - [ ] spec.md exists and has been read
 - [ ] project_index.json exists (created if missing)

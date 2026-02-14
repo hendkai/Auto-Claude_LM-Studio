@@ -148,6 +148,18 @@ cat "$SPEC_DIR/implementation_plan.json"
 # 5. Read the project spec (requirements, patterns, scope)
 cat "$SPEC_DIR/spec.md"
 
+# 6. CRITICAL: Verify actual project structure
+# The implementation plan may contain incorrect paths from the planning phase.
+# ALWAYS verify the ACTUAL directory structure before using paths from the plan.
+find . -type d -maxdepth 2 | head -20
+```
+
+### File Path Validation Rule
+Before creating or modifying files, verify the directory structure:
+- If `implementation_plan.json` references `SnailMail/ContentView.swift` but `ls -la` shows `SmartMailTaggerHost/`, use the ACTUAL directory name
+- **Never assume plan paths are correct** - always check with `ls` first
+- Create missing directories with `mkdir -p` if needed, but use correct names from the actual project
+
 # 6. Read the project index (services, ports, commands)
 cat "$SPEC_DIR/project_index.json" 2>/dev/null || echo "No project index"
 
