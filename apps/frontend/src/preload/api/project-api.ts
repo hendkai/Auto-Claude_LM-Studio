@@ -7,6 +7,11 @@ import type {
   InitializationResult,
   AutoBuildVersionInfo,
   ProjectEnvConfig,
+  ProjectContextData,
+  ProjectIndex,
+  GraphitiMemoryStatus,
+  ContextSearchResult,
+  MemoryEpisode,
   ClaudeAuthResult,
   InfrastructureStatus,
   GraphitiValidationResult,
@@ -44,11 +49,11 @@ export interface ProjectAPI {
   saveKanbanPreferences: (projectId: string, preferences: KanbanPreferences) => Promise<IPCResult>;
 
   // Context Operations
-  getProjectContext: (projectId: string) => Promise<IPCResult<unknown>>;
-  refreshProjectIndex: (projectId: string) => Promise<IPCResult<unknown>>;
-  getMemoryStatus: (projectId: string) => Promise<IPCResult<unknown>>;
-  searchMemories: (projectId: string, query: string) => Promise<IPCResult<unknown>>;
-  getRecentMemories: (projectId: string, limit?: number) => Promise<IPCResult<unknown>>;
+  getProjectContext: (projectId: string) => Promise<IPCResult<ProjectContextData>>;
+  refreshProjectIndex: (projectId: string) => Promise<IPCResult<ProjectIndex>>;
+  getMemoryStatus: (projectId: string) => Promise<IPCResult<GraphitiMemoryStatus>>;
+  searchMemories: (projectId: string, query: string) => Promise<IPCResult<ContextSearchResult[]>>;
+  getRecentMemories: (projectId: string, limit?: number) => Promise<IPCResult<MemoryEpisode[]>>;
 
   // Environment Configuration
   getProjectEnv: (projectId: string) => Promise<IPCResult<ProjectEnvConfig>>;
@@ -187,19 +192,19 @@ export const createProjectAPI = (): ProjectAPI => ({
     ipcRenderer.invoke(IPC_CHANNELS.KANBAN_PREFS_SAVE, projectId, preferences),
 
   // Context Operations
-  getProjectContext: (projectId: string) =>
+  getProjectContext: (projectId: string): Promise<IPCResult<ProjectContextData>> =>
     ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_GET, projectId),
 
-  refreshProjectIndex: (projectId: string) =>
+  refreshProjectIndex: (projectId: string): Promise<IPCResult<ProjectIndex>> =>
     ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_REFRESH_INDEX, projectId),
 
-  getMemoryStatus: (projectId: string) =>
+  getMemoryStatus: (projectId: string): Promise<IPCResult<GraphitiMemoryStatus>> =>
     ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_MEMORY_STATUS, projectId),
 
-  searchMemories: (projectId: string, query: string) =>
+  searchMemories: (projectId: string, query: string): Promise<IPCResult<ContextSearchResult[]>> =>
     ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_SEARCH_MEMORIES, projectId, query),
 
-  getRecentMemories: (projectId: string, limit?: number) =>
+  getRecentMemories: (projectId: string, limit?: number): Promise<IPCResult<MemoryEpisode[]>> =>
     ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_GET_MEMORIES, projectId, limit),
 
   // Environment Configuration

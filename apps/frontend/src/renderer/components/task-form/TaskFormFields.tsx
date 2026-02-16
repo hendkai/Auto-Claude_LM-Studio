@@ -46,9 +46,14 @@ interface TaskFormFieldsProps {
   onTitleChange: (value: string) => void;
 
   // Agent profile
+  projectPath?: string;
+  specId?: string;
+  showFastModeToggle?: boolean;
   profileId: string;
   model: ModelType | '';
   thinkingLevel: ThinkingLevel | '';
+  fastMode?: boolean;
+  onFastModeChange?: (enabled: boolean) => void;
   phaseModels?: PhaseModelConfig;
   phaseThinking?: PhaseThinkingConfig;
   onProfileChange: (profileId: string, model: ModelType | '', thinkingLevel: ThinkingLevel | '') => void;

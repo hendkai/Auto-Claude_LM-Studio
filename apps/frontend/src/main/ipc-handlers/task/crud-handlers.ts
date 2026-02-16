@@ -35,7 +35,7 @@ function syncLegacyPhaseModelsFromV3(metadata: TaskMetadata | undefined): void {
   const phaseModels: Partial<Record<PhaseKey, string>> = {};
 
   for (const phase of PHASE_KEYS) {
-    const chain = (metadata.phaseModelsV3 as Record<string, unknown>)[phase];
+    const chain = (metadata.phaseModelsV3 as unknown as Record<string, unknown>)[phase];
     if (!Array.isArray(chain)) {
       continue;
     }
@@ -189,8 +189,9 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       // Legacy phaseModels are still consumed by backend phase_config.py.
       try {
         const settings = await readSettingsFile();
-        if (!taskMetadata.phaseModelsV3 && settings?.customPhaseModelsV3) {
-          taskMetadata.phaseModelsV3 = settings.customPhaseModelsV3;
+        const configuredPhaseModelsV3 = settings?.customPhaseModelsV3 as TaskMetadata['phaseModelsV3'] | undefined;
+        if (!taskMetadata.phaseModelsV3 && configuredPhaseModelsV3) {
+          taskMetadata.phaseModelsV3 = configuredPhaseModelsV3;
         }
         syncLegacyPhaseModelsFromV3(taskMetadata);
       } catch (err) {

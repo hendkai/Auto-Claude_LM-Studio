@@ -1140,7 +1140,7 @@ export function App() {
 
         {/* Auth Failure Modal - shows when Claude CLI encounters 401/auth errors */}
         <AuthFailureModal onOpenSettings={() => {
-          setSettingsInitialSection('accounts');
+          setSettingsInitialSection('usage');
           setIsSettingsDialogOpen(true);
         }} />
 
@@ -1150,7 +1150,7 @@ export function App() {
           onClose={handleVersionWarningClose}
           onOpenSettings={() => {
             handleVersionWarningClose();
-            setSettingsInitialSection('accounts');
+            setSettingsInitialSection('usage');
             setIsSettingsDialogOpen(true);
           }}
         />

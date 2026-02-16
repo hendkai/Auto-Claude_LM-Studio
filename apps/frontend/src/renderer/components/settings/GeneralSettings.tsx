@@ -18,6 +18,7 @@ import type {
   AppSettings,
   FeatureModelConfig,
   FeatureModelConfigV2,
+  IPCResult,
   ModelTypeShort,
   ProfileModelPair,
   ThinkingLevel,
@@ -99,7 +100,7 @@ export function GeneralSettings({ settings, onSettingsChange, section }: General
     python: ToolDetectionResult;
     git: ToolDetectionResult;
     gh: ToolDetectionResult;
-    glab: ToolDetectionResult;
+    glab?: ToolDetectionResult;
     claude: ToolDetectionResult;
   } | null>(null);
   const [isLoadingTools, setIsLoadingTools] = useState(false);
@@ -110,9 +111,12 @@ export function GeneralSettings({ settings, onSettingsChange, section }: General
       setIsLoadingTools(true);
       window.electronAPI
         .getCliToolsInfo()
-        .then((result: { success: boolean; data?: { python: ToolDetectionResult; git: ToolDetectionResult; gh: ToolDetectionResult; glab: ToolDetectionResult; claude: ToolDetectionResult } }) => {
+        .then((result: IPCResult<{ python: ToolDetectionResult; git: ToolDetectionResult; gh: ToolDetectionResult; glab?: ToolDetectionResult; claude: ToolDetectionResult }>) => {
           if (result.success && result.data) {
-            setToolsInfo(result.data);
+            setToolsInfo({
+              ...result.data,
+              glab: result.data.glab
+            });
           }
         })
         .catch((error: unknown) => {

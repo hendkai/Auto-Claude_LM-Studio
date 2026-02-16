@@ -11,7 +11,7 @@ import path from 'path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, lstatSync, copyFileSync, cpSync, statSync } from 'fs';
 import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
-import { minimatch } from 'minimatch';
+import { Minimatch } from 'minimatch';
 import { debugLog, debugError } from '../../../shared/utils/debug-logger';
 import { projectStore } from '../../project-store';
 import { parseEnvFile } from '../utils';
@@ -138,7 +138,8 @@ function fixMisconfiguredBareRepo(projectPath: string): boolean {
         }
 
         // Use minimatch for proper glob pattern matching
-        return directoryFiles.some(file => minimatch(file, pattern, { nocase: true }));
+        const matcher = new Minimatch(pattern, { nocase: true });
+        return directoryFiles.some(file => matcher.match(file));
       });
 
       if (!hasGlobMatch) {

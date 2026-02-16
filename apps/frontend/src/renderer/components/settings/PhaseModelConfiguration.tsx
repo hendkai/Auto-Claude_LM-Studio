@@ -432,7 +432,3 @@ function AddModelDialog({ phase, isOpen, onClose, onAdd }: AddModelDialogProps) 
     </Dialog>
   );
 }
-
-function useEnabledProviders() {
-  return useLLMProviderStore((state) => state.providers.filter(p => p.enabled));
-}

@@ -119,6 +119,44 @@ export class UsageMonitor extends EventEmitter {
   }
 
   /**
+   * Clear cached usage data, optionally scoped to one profile.
+   */
+  clearProfileUsageCache(profileId?: string): void {
+    if (!profileId || this.currentUsage?.profileId === profileId) {
+      this.currentUsage = null;
+    }
+
+    if (this.allProfilesUsageCache.data) {
+      if (profileId) {
+        this.allProfilesUsageCache.data = {
+          ...this.allProfilesUsageCache.data,
+          allProfiles: this.allProfilesUsageCache.data.allProfiles.filter(
+            (profile) => profile.profileId !== profileId
+          )
+        };
+      } else {
+        this.allProfilesUsageCache.data = null;
+      }
+    }
+
+    this.allProfilesUsageCache.fetchedAtMs = 0;
+  }
+
+  /**
+   * Clear auth-failure cooldown marker for a profile.
+   */
+  clearAuthFailedProfile(profileId: string): void {
+    this.authFailedProfiles.delete(profileId);
+  }
+
+  /**
+   * Trigger an immediate usage check.
+   */
+  async checkNow(): Promise<void> {
+    await this.checkUsageAndSwap();
+  }
+
+  /**
    * Fetch usage summaries for all configured OAuth/API profiles.
    * Used by Account Priority UI for per-profile usage visualization.
    */

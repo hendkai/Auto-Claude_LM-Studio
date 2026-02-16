@@ -181,7 +181,14 @@ export interface GitHubAPI {
   // OAuth operations (gh CLI)
   checkGitHubCli: () => Promise<IPCResult<{ installed: boolean; version?: string }>>;
   checkGitHubAuth: () => Promise<IPCResult<{ authenticated: boolean; username?: string }>>;
-  startGitHubAuth: () => Promise<IPCResult<{ success: boolean; message?: string }>>;
+  startGitHubAuth: () => Promise<IPCResult<{
+    success: boolean;
+    message?: string;
+    deviceCode?: string;
+    authUrl?: string;
+    browserOpened?: boolean;
+    fallbackUrl?: string;
+  }>>;
   getGitHubToken: () => Promise<IPCResult<{ token: string }>>;
   getGitHubUser: () => Promise<IPCResult<{ username: string; name?: string }>>;
   listGitHubUserRepos: () => Promise<IPCResult<{ repos: Array<{ fullName: string; description: string | null; isPrivate: boolean }> }>>;
@@ -551,7 +558,14 @@ export const createGitHubAPI = (): GitHubAPI => ({
   checkGitHubAuth: (): Promise<IPCResult<{ authenticated: boolean; username?: string }>> =>
     invokeIpc(IPC_CHANNELS.GITHUB_CHECK_AUTH),
 
-  startGitHubAuth: (): Promise<IPCResult<{ success: boolean; message?: string }>> =>
+  startGitHubAuth: (): Promise<IPCResult<{
+    success: boolean;
+    message?: string;
+    deviceCode?: string;
+    authUrl?: string;
+    browserOpened?: boolean;
+    fallbackUrl?: string;
+  }>> =>
     invokeIpc(IPC_CHANNELS.GITHUB_START_AUTH),
 
   getGitHubToken: (): Promise<IPCResult<{ token: string }>> =>

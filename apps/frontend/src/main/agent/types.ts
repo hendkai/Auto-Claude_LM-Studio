@@ -1,6 +1,6 @@
 import { ChildProcess } from 'child_process';
 import type { IdeationConfig, ProfileModelPair, TaskMetadata } from '../../shared/types';
-import type { PhaseModelConfigV3 } from '../../shared/types/settings';
+import type { ModelTypeShort, PhaseModelConfigV3 } from '../../shared/types/settings';
 import type { CompletablePhase } from '../../shared/constants/phase-protocol';
 
 /**
@@ -11,7 +11,7 @@ export type QueueProcessType = 'ideation' | 'roadmap';
 
 export interface AgentProcess {
   taskId: string;
-  process: ChildProcess;
+  process: ChildProcess | null;
   startedAt: Date;
   projectPath?: string; // For ideation processes to load session on completion
   spawnId: number; // Unique ID to identify this specific spawn
@@ -30,7 +30,16 @@ export interface AgentProcess {
 }
 
 export interface ExecutionProgressData {
-  phase: 'idle' | 'planning' | 'coding' | 'qa_review' | 'qa_fixing' | 'complete' | 'failed';
+  phase:
+    | 'idle'
+    | 'planning'
+    | 'coding'
+    | 'rate_limit_paused'
+    | 'auth_failure_paused'
+    | 'qa_review'
+    | 'qa_fixing'
+    | 'complete'
+    | 'failed';
   phaseProgress: number;
   overallProgress: number;
   currentSubtask?: string;
@@ -69,10 +78,10 @@ export interface SpecCreationMetadata {
   // Auto profile - phase-based model and thinking configuration
   isAutoProfile?: boolean;
   phaseModels?: {
-    spec: 'haiku' | 'sonnet' | 'opus';
-    planning: 'haiku' | 'sonnet' | 'opus';
-    coding: 'haiku' | 'sonnet' | 'opus';
-    qa: 'haiku' | 'sonnet' | 'opus';
+    spec: ModelTypeShort;
+    planning: ModelTypeShort;
+    coding: ModelTypeShort;
+    qa: ModelTypeShort;
   };
   phaseThinking?: {
     spec: 'none' | 'low' | 'medium' | 'high' | 'ultrathink';
@@ -83,7 +92,7 @@ export interface SpecCreationMetadata {
   // V3: Profile + model fallback chains per phase
   phaseModelsV3?: PhaseModelConfigV3;
   // Non-auto profile - single model and thinking level
-  model?: 'haiku' | 'sonnet' | 'opus';
+  model?: ModelTypeShort;
   thinkingLevel?: 'none' | 'low' | 'medium' | 'high' | 'ultrathink';
   // Workspace mode - whether to use worktree isolation
   useWorktree?: boolean; // If false, use --direct mode (no worktree isolation)

@@ -233,7 +233,7 @@ export class TaskStateManager {
     const actor = snapshot
       ? createActor(taskMachine, { snapshot })
       : createActor(taskMachine);
-    actor.subscribe((snapshot) => {
+    actor.subscribe((snapshot: { value: unknown; context: { reviewReason?: ReviewReason } }) => {
       const stateValue = String(snapshot.value);
       const lastState = this.lastStateByTask.get(taskId);
 

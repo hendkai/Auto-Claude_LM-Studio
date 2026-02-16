@@ -152,10 +152,12 @@ export const taskMachine = createMachine(
   },
   {
     guards: {
-      requiresReview: ({ event }) =>
+      requiresReview: ({ event }: { event: TaskEvent }) =>
         event.type === 'PLANNING_COMPLETE' && event.requireReviewBeforeCoding === true,
-      noPlanYet: ({ event }) => event.type === 'USER_STOPPED' && event.hasPlan === false,
-      unexpectedExit: ({ event }) => event.type === 'PROCESS_EXITED' && event.unexpected === true
+      noPlanYet: ({ event }: { event: TaskEvent }) =>
+        event.type === 'USER_STOPPED' && event.hasPlan === false,
+      unexpectedExit: ({ event }: { event: TaskEvent }) =>
+        event.type === 'PROCESS_EXITED' && event.unexpected === true
     },
     actions: {
       setReviewReasonPlan: assign({ reviewReason: () => 'plan_review' }),
@@ -165,7 +167,7 @@ export const taskMachine = createMachine(
       setReviewReasonErrors: assign({ reviewReason: () => 'errors' }),
       clearReviewReason: assign({ reviewReason: () => undefined, error: () => undefined }),
       setError: assign({
-        error: ({ event }) => {
+        error: ({ event }: { event: TaskEvent }) => {
           if (event.type === 'PLANNING_FAILED') {
             return event.error;
           }

@@ -143,7 +143,7 @@ export function LLMProviderConfigModal({
       // });
       
       // Simulate test
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise<void>((resolve) => window.setTimeout(() => resolve(), 1500));
       
       // Simulate success (in reality, check the actual connection)
       const hasAuth = authConfig.type === 'apiKey' 
@@ -177,7 +177,7 @@ export function LLMProviderConfigModal({
       // });
       
       // Simulate loading models
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await new Promise<void>((resolve) => window.setTimeout(() => resolve(), 800));
       
       const mockModels: Record<LLMProviderType, ModelInfo[]> = {
         anthropic: [

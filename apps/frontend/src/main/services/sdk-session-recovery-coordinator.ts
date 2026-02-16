@@ -380,7 +380,7 @@ export class SDKSessionRecoveryCoordinator extends EventEmitter {
       // - Base: availability score (0-100)
       // - Penalty: -15 per active operation
       // - Penalty: -5 per previous rate limit
-      let score = profile.availabilityScore;
+      let score = profile.availabilityScore ?? 0;
       score -= operationsOnProfile * OPERATION_PENALTY_POINTS;
       score -= (cooldown?.rateLimitCount ?? 0) * RATE_LIMIT_PENALTY_POINTS;
 

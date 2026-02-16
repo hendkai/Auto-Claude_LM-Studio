@@ -74,3 +74,25 @@ export interface ClaudeInstallationList {
   /** Path to the currently active installation (from settings or auto-detected) */
   activePath: string | null;
 }
+
+/**
+ * Codex CLI version information
+ */
+export interface CodexVersionInfo {
+  installed: string | null;
+  latest: string;
+  isOutdated: boolean;
+  path?: string;
+  detectionResult: ToolDetectionResult;
+}
+
+/**
+ * Kimi Code CLI version information
+ */
+export interface KimiCodeVersionInfo {
+  installed: string | null;
+  latest: string;
+  isOutdated: boolean;
+  path?: string;
+  detectionResult: ToolDetectionResult;
+}

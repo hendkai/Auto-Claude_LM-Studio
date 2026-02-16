@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import type {
+  IPCResult,
   ReleaseableVersion,
   ReleasePreflightStatus,
   ReleaseProgress,
-  CreateReleaseResult
+  CreateReleaseResult,
+  CreateReleaseRequest
 } from '../../shared/types';
 
 interface ReleaseState {
@@ -94,7 +96,14 @@ export async function loadReleaseableVersions(projectId: string): Promise<void> 
   store.setError(null);
 
   try {
-    const result = await window.electronAPI.getReleaseableVersions(projectId);
+    const releaseApi = window.electronAPI as typeof window.electronAPI & {
+      getReleaseableVersions?: (id: string) => Promise<IPCResult<ReleaseableVersion[]>>;
+    };
+    if (!releaseApi.getReleaseableVersions) {
+      store.setError('Release API is not available in this build');
+      return;
+    }
+    const result = await releaseApi.getReleaseableVersions(projectId);
     if (result.success && result.data) {
       store.setReleaseableVersions(result.data);
 
@@ -131,7 +140,14 @@ export async function runPreflightCheck(projectId: string): Promise<void> {
   store.setError(null);
 
   try {
-    const result = await window.electronAPI.runReleasePreflightCheck(projectId, version);
+    const releaseApi = window.electronAPI as typeof window.electronAPI & {
+      runReleasePreflightCheck?: (id: string, version: string) => Promise<IPCResult<ReleasePreflightStatus>>;
+    };
+    if (!releaseApi.runReleasePreflightCheck) {
+      store.setError('Release preflight API is not available in this build');
+      return;
+    }
+    const result = await releaseApi.runReleasePreflightCheck(projectId, version);
     if (result.success && result.data) {
       store.setPreflightStatus(result.data);
     } else {
@@ -171,7 +187,16 @@ export function createRelease(projectId: string): void {
     message: 'Starting release...'
   });
 
-  window.electronAPI.createRelease({
+  const releaseApi = window.electronAPI as typeof window.electronAPI & {
+    createRelease?: (request: CreateReleaseRequest) => void;
+  };
+  if (!releaseApi.createRelease) {
+    store.setIsCreatingRelease(false);
+    store.setError('Release creation API is not available in this build');
+    return;
+  }
+
+  releaseApi.createRelease({
     projectId,
     version,
     body: versionInfo.content,

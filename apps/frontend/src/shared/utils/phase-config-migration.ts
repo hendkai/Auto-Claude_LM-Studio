@@ -34,7 +34,9 @@ export function migrateV1ToV3(
     const modelMap: Record<ModelTypeShort, string> = {
         'haiku': 'claude-haiku-4-5-20251001',
         'sonnet': 'claude-sonnet-4-5-20250929',
-        'opus': 'claude-opus-4-5-20251101'
+        'opus': 'claude-opus-4-5-20251101',
+        'opus-1m': 'claude-opus-4-5-20251101',
+        'opus-4.5': 'claude-opus-4-5-20251101'
     };
 
     const toPair = (modelType: ModelTypeShort): ProfileModelPair => ({

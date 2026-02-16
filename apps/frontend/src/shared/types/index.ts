@@ -11,9 +11,21 @@ export * from './task';
 export * from './terminal';
 export * from './agent';
 export * from './settings';
+export * from './kanban';
+export * from './screenshot';
+export type {
+  APIProfile,
+  ProfilesFile,
+  ProfileFormData,
+  ConnectionErrorType,
+  TestConnectionResult,
+  DiscoverModelsResult,
+  DiscoverModelsError
+} from './profile';
 export * from './changelog';
 export * from './insights';
 export * from './roadmap';
+export * from './pr-status';
 export * from './integrations';
 export * from './app-update';
 export * from './cli';

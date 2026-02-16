@@ -545,6 +545,43 @@ export class AgentManager extends EventEmitter {
     return true;
   }
 
+  // ============================================
+  // Queue Routing Methods (Rate Limit Recovery)
+  // ============================================
+
+  /**
+   * Get running tasks grouped by profile.
+   */
+  getRunningTasksByProfile(): { byProfile: Record<string, string[]>; totalRunning: number } {
+    return this.state.getRunningTasksByProfile();
+  }
+
+  /**
+   * Assign a profile to a task.
+   */
+  assignProfileToTask(
+    taskId: string,
+    profileId: string,
+    profileName: string,
+    reason: 'proactive' | 'reactive' | 'manual'
+  ): void {
+    this.state.assignProfileToTask(taskId, profileId, profileName, reason);
+  }
+
+  /**
+   * Update session ID for a task.
+   */
+  updateTaskSession(taskId: string, sessionId: string): void {
+    this.state.updateTaskSession(taskId, sessionId);
+  }
+
+  /**
+   * Get session ID for a task.
+   */
+  getTaskSessionId(taskId: string): string | undefined {
+    return this.state.getTaskSessionId(taskId);
+  }
+
   /**
    * Set whether to ignore exit events for a specific task.
    * Useful when manually stopping a task and handling cleanup elsewhere.

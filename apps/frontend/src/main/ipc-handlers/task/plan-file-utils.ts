@@ -188,6 +188,60 @@ export function persistPlanStatusSync(planPath: string, status: TaskStatus, proj
 }
 
 /**
+ * Persist task status plus review metadata synchronously.
+ * Used by TaskStateManager to keep legacy/task-state fields aligned.
+ */
+export function persistPlanStatusAndReasonSync(
+  planPath: string,
+  status: TaskStatus,
+  reviewReason?: string,
+  projectId?: string,
+  xstateState?: string,
+  executionPhase?: string
+): boolean {
+  try {
+    let plan: Record<string, unknown>;
+
+    try {
+      const planContent = readFileSync(planPath, 'utf-8');
+      plan = JSON.parse(planContent);
+    } catch (readErr) {
+      if (!isFileNotFoundError(readErr)) {
+        throw readErr;
+      }
+      const planDir = path.dirname(planPath);
+      mkdirSync(planDir, { recursive: true });
+      plan = {
+        created_at: new Date().toISOString(),
+        phases: []
+      };
+    }
+
+    plan.status = status;
+    plan.planStatus = mapStatusToPlanStatus(status);
+    plan.reviewReason = reviewReason;
+    if (xstateState) {
+      plan.xstateState = xstateState;
+    }
+    if (executionPhase) {
+      plan.executionPhase = executionPhase;
+    }
+    plan.updated_at = new Date().toISOString();
+
+    writeFileSync(planPath, JSON.stringify(plan, null, 2));
+
+    if (projectId) {
+      projectStore.invalidateTasksCache(projectId);
+    }
+
+    return true;
+  } catch (err) {
+    console.warn(`[plan-file-utils] Could not persist status/reason to ${planPath}:`, err);
+    return false;
+  }
+}
+
+/**
  * Read and update the plan file atomically.
  *
  * @param planPath - Path to the implementation_plan.json file

@@ -112,8 +112,14 @@ class BufferPersistence {
         return;
       }
 
-      // Save via IPC
-      await window.electronAPI.saveTerminalBuffer(terminalId, serialized);
+      // Save via IPC when supported (older preload bundles may not expose this method)
+      const electronApi = window.electronAPI as typeof window.electronAPI & {
+        saveTerminalBuffer?: (id: string, serialized: string) => Promise<void>;
+      };
+      if (!electronApi.saveTerminalBuffer) {
+        return;
+      }
+      await electronApi.saveTerminalBuffer(terminalId, serialized);
 
       // Update last saved size
       managed.lastSavedSize = currentSize;
@@ -138,7 +144,13 @@ class BufferPersistence {
 
     try {
       const serialized = managed.serializeAddon.serialize();
-      await window.electronAPI.saveTerminalBuffer(terminalId, serialized);
+      const electronApi = window.electronAPI as typeof window.electronAPI & {
+        saveTerminalBuffer?: (id: string, serialized: string) => Promise<void>;
+      };
+      if (!electronApi.saveTerminalBuffer) {
+        return;
+      }
+      await electronApi.saveTerminalBuffer(terminalId, serialized);
       managed.lastSavedSize = serialized.length;
       console.warn(`[BufferPersistence] Immediate save for ${terminalId} complete`);
     } catch (error) {

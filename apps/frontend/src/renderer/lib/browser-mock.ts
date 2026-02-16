@@ -28,7 +28,7 @@ const isElectron = typeof window !== 'undefined' && window.electronAPI !== undef
  * Create mock electronAPI for browser
  * Aggregates all mock implementations from separate modules
  */
-const browserMockAPI: ElectronAPI = {
+const browserMockAPI: Partial<ElectronAPI> = {
   // Project Operations
   ...projectMock,
 
@@ -383,7 +383,7 @@ const browserMockAPI: ElectronAPI = {
 export function initBrowserMock(): void {
   if (!isElectron) {
     console.warn('%c[Browser Mock] Initializing mock electronAPI for browser preview', 'color: #f0ad4e; font-weight: bold;');
-    (window as Window & { electronAPI: ElectronAPI }).electronAPI = browserMockAPI;
+    (window as Window & { electronAPI: ElectronAPI }).electronAPI = browserMockAPI as ElectronAPI;
   }
 }
 

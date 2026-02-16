@@ -18,6 +18,8 @@ import { McpAPI, createMcpAPI } from './modules/mcp-api';
 import { ProfileAPI, createProfileAPI } from './profile-api';
 import { GiteaAPI, createGiteaAPI } from './modules/gitea-api';
 import { NetworkAPI, createNetworkAPI } from './network-api';
+import { QueueAPI, createQueueAPI } from './queue-api';
+import { ScreenshotAPI, createScreenshotAPI } from './screenshot-api';
 
 export interface ElectronAPI extends
   ProjectAPI,
@@ -38,8 +40,10 @@ export interface ElectronAPI extends
   McpAPI,
   ProfileAPI,
   GiteaAPI,
+  ScreenshotAPI,
   NetworkAPI {
   github: GitHubAPI;
+  queue: QueueAPI;
 }
 
 export const createElectronAPI = (): ElectronAPI => ({
@@ -58,7 +62,9 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createMcpAPI(),
   ...createProfileAPI(),
   ...createGiteaAPI(),
+  ...createScreenshotAPI(),
   ...createNetworkAPI(),
+  queue: createQueueAPI(),
   github: createGitHubAPI()
 });
 
@@ -81,7 +87,9 @@ export {
   createLLMProviderAPI,
   createMcpAPI,
   createGiteaAPI,
-  createNetworkAPI
+  createNetworkAPI,
+  createQueueAPI,
+  createScreenshotAPI
 };
 
 export type {
@@ -104,5 +112,7 @@ export type {
   LLMProviderAPI,
   McpAPI,
   GiteaAPI,
-  NetworkAPI
+  NetworkAPI,
+  QueueAPI,
+  ScreenshotAPI
 };

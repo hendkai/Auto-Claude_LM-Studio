@@ -124,7 +124,7 @@ export const useLLMProviderStore = create<LLMProviderState & LLMProviderActions>
         
         updateProvider: (providerId, updates) => {
           set((state) => {
-            const index = state.providers.findIndex(p => p.id === providerId);
+            const index = state.providers.findIndex((p: LLMProviderSettings) => p.id === providerId);
             if (index !== -1) {
               state.providers[index] = {
                 ...state.providers[index],
@@ -137,14 +137,14 @@ export const useLLMProviderStore = create<LLMProviderState & LLMProviderActions>
         
         removeProvider: (providerId) => {
           set((state) => {
-            state.providers = state.providers.filter(p => p.id !== providerId);
+            state.providers = state.providers.filter((p: LLMProviderSettings) => p.id !== providerId);
             delete state.usageData[providerId];
           });
         },
         
         toggleProvider: (providerId) => {
           set((state) => {
-            const provider = state.providers.find(p => p.id === providerId);
+            const provider = state.providers.find((p: LLMProviderSettings) => p.id === providerId);
             if (provider) {
               provider.enabled = !provider.enabled;
               provider.updatedAt = new Date();
@@ -279,7 +279,7 @@ export const useLLMProviderStore = create<LLMProviderState & LLMProviderActions>
           // Find first available provider
           for (let i = 0; i < priorityList.length; i++) {
             const ref = priorityList[i];
-            const provider = providers.find(p => p.id === ref.providerId);
+            const provider = providers.find((p: LLMProviderSettings) => p.id === ref.providerId);
             
             if (!provider || !provider.enabled) continue;
             
@@ -347,7 +347,7 @@ export const useLLMProviderStore = create<LLMProviderState & LLMProviderActions>
  */
 export function useEnabledProviders() {
   return useLLMProviderStore((state) => 
-    state.providers.filter(p => p.enabled)
+    state.providers.filter((p: LLMProviderSettings) => p.enabled)
   );
 }
 
@@ -356,7 +356,7 @@ export function useEnabledProviders() {
  */
 export function useProvidersByType(type: LLMProviderType) {
   return useLLMProviderStore((state) => 
-    state.providers.filter(p => p.providerType === type)
+    state.providers.filter((p: LLMProviderSettings) => p.providerType === type)
   );
 }
 
@@ -365,7 +365,7 @@ export function useProvidersByType(type: LLMProviderType) {
  */
 export function useProvider(providerId: string) {
   return useLLMProviderStore((state) => 
-    state.providers.find(p => p.id === providerId)
+    state.providers.find((p: LLMProviderSettings) => p.id === providerId)
   );
 }
 
