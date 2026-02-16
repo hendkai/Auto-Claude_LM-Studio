@@ -78,20 +78,39 @@ class ExternalCLIClient:
         )
 
     @staticmethod
+    def _split_path_entry(raw_entry: str) -> list[str]:
+        """Split a PATH fragment, including POSIX-style sublists on Windows."""
+        entry = raw_entry.strip()
+        if not entry:
+            return []
+
+        # On Windows, inherited PATH values may still contain POSIX-style
+        # segments like "/usr/bin:/bin". Split those while preserving drive
+        # paths such as "C:\\Program Files\\nodejs".
+        is_windows_drive = (
+            len(entry) >= 3
+            and entry[1] == ":"
+            and entry[0].isalpha()
+            and entry[2] in ("\\", "/")
+        )
+        if os.pathsep == ";" and ":" in entry and not is_windows_drive:
+            return [part for part in (p.strip() for p in entry.split(":")) if part]
+
+        return [entry]
+
+    @staticmethod
     def _merge_path_entries(existing_path: str, extra_dirs: list[str]) -> str:
         """Merge path entries while preserving order and removing duplicates."""
         ordered: list[str] = []
         seen: set[str] = set()
 
         for raw_entry in [*extra_dirs, *existing_path.split(os.pathsep)]:
-            entry = raw_entry.strip()
-            if not entry:
-                continue
-            normalized = os.path.normcase(os.path.normpath(entry))
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            ordered.append(entry)
+            for entry in ExternalCLIClient._split_path_entry(raw_entry):
+                normalized = os.path.normcase(os.path.normpath(entry))
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                ordered.append(entry)
 
         return os.pathsep.join(ordered)
 
