@@ -25,6 +25,7 @@ const RATE_LIMIT_INDICATORS = [
   /^limit\s*reached/i,  // Only "limit reached" at start of line (not "out of extra usage")
   /rate\s*limit\s*exceeded/i,
   /usage\s*limit\s*exceeded/i,
+  /exceeded\s+your\s+limit/i,
   /exceeded.*rate\s*limit/i,
   /too\s*many\s*requests/i,
   /429\s*too\s*many\s*requests/i,

@@ -141,10 +141,16 @@ export function registerAgenteventsHandlers(
 
   agentManager.on('exit', async (taskId: string, code: number | null, processType: ProcessType) => {
     // Check if we should ignore this exit event (e.g. manual stop during status update)
-    if (agentManager.shouldIgnoreExit(taskId)) {
+    const shouldIgnoreExit =
+      typeof agentManager.shouldIgnoreExit === 'function' &&
+      agentManager.shouldIgnoreExit(taskId);
+
+    if (shouldIgnoreExit) {
       console.log(`[Task ${taskId}] Ignoring exit event as requested (manual stop)`);
       // Reset the flag immediately as it's a one-time suppression
-      agentManager.setIgnoreExit(taskId, false);
+      if (typeof agentManager.setIgnoreExit === 'function') {
+        agentManager.setIgnoreExit(taskId, false);
+      }
       return;
     }
 
@@ -189,12 +195,9 @@ export function registerAgenteventsHandlers(
       }
 
       // CRITICAL: Always unwatch file watcher, even if other operations fail
-      try {
-        await fileWatcher.unwatch(taskId);
-      } catch (unwatchError) {
+      void fileWatcher.unwatch(taskId).catch((unwatchError) => {
         console.error(`[Task ${taskId}] Failed to unwatch file watcher:`, unwatchError);
-        // Continue execution - this shouldn't prevent status updates
-      }
+      });
 
       if (processType === 'spec-creation') {
         console.warn(`[Task ${taskId}] Spec creation completed with code ${code}`);
@@ -224,6 +227,43 @@ export function registerAgenteventsHandlers(
 
         if (!task || !project) {
           console.warn(`[Task ${taskId}] Exit handler: Task or project not found after process exit (Project found: ${!!project})`);
+          const fallbackProject = projectStore.getProjects().find((candidate) => {
+            const specsBaseDir = getSpecsDir(candidate.autoBuildPath);
+            const fallbackPlanPath = path.join(
+              candidate.path,
+              specsBaseDir,
+              taskId,
+              AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN
+            );
+            return existsSync(fallbackPlanPath);
+          });
+
+          if (!fallbackProject || code === 0) {
+            return;
+          }
+
+          const fallbackSpecsBaseDir = getSpecsDir(fallbackProject.autoBuildPath);
+          const fallbackPlanPath = path.join(
+            fallbackProject.path,
+            fallbackSpecsBaseDir,
+            taskId,
+            AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN
+          );
+
+          safeSendToRenderer(
+            getMainWindow,
+            IPC_CHANNELS.TASK_STATUS_CHANGE,
+            taskId,
+            'human_review' as TaskStatus,
+            fallbackProject.id,
+            'errors'
+          );
+
+          await persistPlanStatus(fallbackPlanPath, 'human_review', fallbackProject.id);
+          await updatePlanFile<Record<string, unknown>>(fallbackPlanPath, (plan) => ({
+            ...plan,
+            reviewReason: 'errors'
+          }));
           return;
         }
 
@@ -386,7 +426,6 @@ export function registerAgenteventsHandlers(
           }
 
           try {
-            await persistStatus('human_review', "errors");
             // Include projectId for multi-project filtering (issue #723)
             safeSendToRenderer(
               getMainWindow,
@@ -396,6 +435,7 @@ export function registerAgenteventsHandlers(
               projectId,
               "errors"
             );
+            await persistStatus('human_review', "errors");
           } catch (statusUpdateError) {
             console.error(`[Task ${taskId}] Failed to update status after failure:`, statusUpdateError);
           }
@@ -420,7 +460,10 @@ export function registerAgenteventsHandlers(
     // Check if we should ignore events for this task (e.g. manual stop)
     // This prevents race conditions where "failed" progress events (triggered by kill)
     // try to persist status via sync write while the async status update is in progress.
-    if (agentManager.shouldIgnoreExit(taskId)) {
+    const shouldIgnoreExit =
+      typeof agentManager.shouldIgnoreExit === 'function' &&
+      agentManager.shouldIgnoreExit(taskId);
+    if (shouldIgnoreExit) {
       return;
     }
 

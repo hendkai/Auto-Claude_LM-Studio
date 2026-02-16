@@ -12,8 +12,9 @@
 import { EventEmitter } from 'events';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { ClaudeUsageSnapshot, AllProfilesUsage, ProfileUsageSummary } from '../../shared/types/agent';
-import { loadProfilesFile } from '../services/profile';
+import { loadProfilesFile } from '../services/profile/profile-manager';
 import { APIProfile } from '../../shared/types/profile';
+import { detectProvider as detectProviderFromUrl } from '../../shared/utils/provider-detection';
 
 interface GlmLimit {
   type: string;
@@ -32,17 +33,51 @@ interface GlmResponse {
   }
 }
 
+export type ApiProvider = 'anthropic' | 'zai' | 'zhipu' | 'unknown';
+
+interface ActiveProfileContext {
+  isAPIProfile: boolean;
+  profileId: string;
+  profileName: string;
+  baseUrl?: string;
+}
+
+export function detectProvider(baseUrl: string): ApiProvider {
+  return detectProviderFromUrl(baseUrl);
+}
+
+export function getUsageEndpoint(provider: ApiProvider, baseUrl: string): string | null {
+  let origin: string;
+  try {
+    origin = new URL(baseUrl).origin;
+  } catch (_error) {
+    return null;
+  }
+
+  switch (provider) {
+    case 'anthropic':
+      return `${origin}/api/oauth/usage`;
+    case 'zai':
+    case 'zhipu':
+      return `${origin}/api/monitor/usage/quota/limit`;
+    default:
+      return null;
+  }
+}
+
 export class UsageMonitor extends EventEmitter {
   private static instance: UsageMonitor;
   private intervalId: NodeJS.Timeout | null = null;
   private currentUsage: ClaudeUsageSnapshot | null = null;
   private isChecking = false;
   private useApiMethod = true; // Try API first, fall back to CLI if it fails
+  private apiFailureTimestamps: Map<string, number> = new Map();
   private allProfilesUsageCache: { data: AllProfilesUsage | null; fetchedAtMs: number } = {
     data: null,
     fetchedAtMs: 0
   };
   private static ALL_PROFILES_USAGE_CACHE_MS = 60 * 1000;
+  private static API_FAILURE_COOLDOWN_MS = 2 * 60 * 1000;
   
   // Swap loop protection: track profiles that recently failed auth
   private authFailedProfiles: Map<string, number> = new Map(); // profileId -> timestamp
@@ -154,6 +189,205 @@ export class UsageMonitor extends EventEmitter {
    */
   async checkNow(): Promise<void> {
     await this.checkUsageAndSwap();
+  }
+
+  private shouldUseApiMethod(profileId: string): boolean {
+    if (!this.useApiMethod) {
+      return false;
+    }
+
+    const lastFailure = this.apiFailureTimestamps.get(profileId);
+    if (!lastFailure) {
+      return true;
+    }
+
+    if (Date.now() - lastFailure >= UsageMonitor.API_FAILURE_COOLDOWN_MS) {
+      this.apiFailureTimestamps.delete(profileId);
+      return true;
+    }
+
+    return false;
+  }
+
+  private async getCredential(profileId?: string): Promise<string | null> {
+    try {
+      const profilesFile = await loadProfilesFile();
+      const activeApiProfile = profilesFile.activeProfileId
+        ? profilesFile.profiles.find((profile) => profile.id === profilesFile.activeProfileId)
+        : undefined;
+
+      if (activeApiProfile?.apiKey) {
+        return activeApiProfile.apiKey;
+      }
+
+      if (profileId) {
+        const matchedApiProfile = profilesFile.profiles.find((profile) => profile.id === profileId);
+        if (matchedApiProfile?.apiKey) {
+          return matchedApiProfile.apiKey;
+        }
+      }
+    } catch (_error) {
+      // Fall back to OAuth profile token below.
+    }
+
+    const profileManager = getClaudeProfileManager();
+    const activeProfile = profileManager.getActiveProfile?.();
+    if (!activeProfile) {
+      return null;
+    }
+
+    return (await profileManager.getProfileToken(activeProfile.id)) ?? null;
+  }
+
+  private async resolveActiveProfileContext(
+    profileId: string,
+    profileName: string,
+    activeProfile?: ActiveProfileContext
+  ): Promise<ActiveProfileContext> {
+    if (activeProfile) {
+      return activeProfile;
+    }
+
+    try {
+      const profilesFile = await loadProfilesFile();
+      const matchedProfile = profilesFile.profiles.find((profile) => profile.id === profileId);
+      const selectedProfile = matchedProfile || (
+        profilesFile.activeProfileId
+          ? profilesFile.profiles.find((profile) => profile.id === profilesFile.activeProfileId)
+          : undefined
+      );
+
+      if (selectedProfile) {
+        return {
+          isAPIProfile: true,
+          profileId: selectedProfile.id,
+          profileName: selectedProfile.name,
+          baseUrl: selectedProfile.baseUrl
+        };
+      }
+    } catch (_error) {
+      // Ignore profile-file read issues and use OAuth defaults below.
+    }
+
+    return {
+      isAPIProfile: false,
+      profileId,
+      profileName,
+      baseUrl: 'https://api.anthropic.com'
+    };
+  }
+
+  private normalizeAnthropicResponse(
+    rawData: unknown,
+    profileId: string,
+    profileName: string
+  ): ClaudeUsageSnapshot {
+    const data = (rawData || {}) as {
+      five_hour_utilization?: number;
+      seven_day_utilization?: number;
+      five_hour_reset_at?: string;
+      seven_day_reset_at?: string;
+    };
+
+    const sessionUtilization = typeof data.five_hour_utilization === 'number' ? data.five_hour_utilization : 0;
+    const weeklyUtilization = typeof data.seven_day_utilization === 'number' ? data.seven_day_utilization : 0;
+
+    return {
+      sessionPercent: Math.round(sessionUtilization * 100),
+      weeklyPercent: Math.round(weeklyUtilization * 100),
+      sessionResetTimestamp: typeof data.five_hour_reset_at === 'string' ? data.five_hour_reset_at : undefined,
+      weeklyResetTimestamp: typeof data.seven_day_reset_at === 'string' ? data.seven_day_reset_at : undefined,
+      profileId,
+      profileName,
+      fetchedAt: new Date(),
+      limitType: weeklyUtilization > sessionUtilization ? 'weekly' : 'session'
+    };
+  }
+
+  private normalizeQuotaLimitResponse(
+    rawData: unknown,
+    profileId: string,
+    profileName: string
+  ): ClaudeUsageSnapshot | null {
+    const limits = (rawData as { limits?: GlmLimit[] } | null)?.limits;
+    if (!Array.isArray(limits) || limits.length === 0) {
+      return null;
+    }
+
+    const tokenLimit = limits.find((limit) => /TOKEN/i.test(limit.type));
+    const timeLimit = limits.find((limit) => /TIME/i.test(limit.type));
+    if (!tokenLimit && !timeLimit) {
+      return null;
+    }
+
+    const now = Date.now();
+    const sessionResetTimestamp = typeof tokenLimit?.nextResetTime === 'number'
+      ? new Date(tokenLimit.nextResetTime).toISOString()
+      : new Date(now + 5 * 60 * 60 * 1000).toISOString();
+    const weeklyResetTimestamp = typeof timeLimit?.nextResetTime === 'number'
+      ? new Date(timeLimit.nextResetTime).toISOString()
+      : new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const formatNumber = (value?: number): string => {
+      if (value === undefined || value === null) {
+        return 'N/A';
+      }
+      if (value >= 1000000) {
+        return `${(value / 1000000).toFixed(2)}M`;
+      }
+      if (value >= 1000) {
+        return `${(value / 1000).toFixed(1)}K`;
+      }
+      return value.toString();
+    };
+
+    const customUsageDetails = limits.map((limit) => ({
+      label: limit.type,
+      value: `${formatNumber(limit.currentValue)} / ${formatNumber(limit.usage)}`,
+      percentage: Math.round(limit.percentage ?? 0),
+      resetTime: typeof limit.nextResetTime === 'number'
+        ? this.formatResetTime(new Date(limit.nextResetTime).toISOString())
+        : undefined
+    }));
+
+    const sessionPercent = Math.round(tokenLimit?.percentage ?? 0);
+    const weeklyPercent = Math.round(timeLimit?.percentage ?? 0);
+
+    return {
+      sessionPercent,
+      weeklyPercent,
+      sessionResetTimestamp,
+      weeklyResetTimestamp,
+      sessionUsageValue: typeof tokenLimit?.currentValue === 'number' ? tokenLimit.currentValue : undefined,
+      sessionUsageLimit: typeof tokenLimit?.usage === 'number' ? tokenLimit.usage : undefined,
+      weeklyUsageValue: typeof timeLimit?.currentValue === 'number' ? timeLimit.currentValue : undefined,
+      weeklyUsageLimit: typeof timeLimit?.usage === 'number' ? timeLimit.usage : undefined,
+      profileId,
+      profileName,
+      fetchedAt: new Date(),
+      limitType: weeklyPercent > sessionPercent ? 'weekly' : 'session',
+      usageWindows: {
+        sessionWindowLabel: 'common:usage.window5HoursQuota',
+        weeklyWindowLabel: 'common:usage.windowMonthlyToolsQuota'
+      },
+      customUsageDetails
+    };
+  }
+
+  private normalizeZAIResponse(
+    rawData: unknown,
+    profileId: string,
+    profileName: string
+  ): ClaudeUsageSnapshot | null {
+    return this.normalizeQuotaLimitResponse(rawData, profileId, profileName);
+  }
+
+  private normalizeZhipuResponse(
+    rawData: unknown,
+    profileId: string,
+    profileName: string
+  ): ClaudeUsageSnapshot | null {
+    return this.normalizeQuotaLimitResponse(rawData, profileId, profileName);
   }
 
   /**
@@ -402,17 +636,18 @@ export class UsageMonitor extends EventEmitter {
    * Fetch usage for a custom API Profile
    */
   private async fetchApiProfileUsage(profile: APIProfile): Promise<ClaudeUsageSnapshot | null> {
-    // Check if it's a GLM profile
-    const isGlm = profile.baseUrl.includes('api.z.ai') || profile.baseUrl.includes('bigmodel.cn');
-
-    if (isGlm) {
-      const usage = await this.fetchGlmUsage(profile.apiKey || '', profile.id, profile.name);
-      if (usage) return usage;
+    if (!profile.apiKey) {
+      return null;
     }
 
-    // Generic API usage fetch could go here (e.g. standard Anthropic compatible)
-    // For now returning null so it doesn't break anything else
-    return null;
+    const activeProfile: ActiveProfileContext = {
+      isAPIProfile: true,
+      profileId: profile.id,
+      profileName: profile.name,
+      baseUrl: profile.baseUrl
+    };
+
+    return this.fetchUsageViaAPI(profile.apiKey, profile.id, profile.name, undefined, activeProfile);
   }
 
   /**
@@ -448,69 +683,10 @@ export class UsageMonitor extends EventEmitter {
         }
 
         const rawData = await response.json();
-        // Handle potentially wrapped response (Rust impl handles "data" wrapper or direct)
-        // We defined interface assuming wrapper or direct check
-        const data = (rawData.data || rawData) as { limits: GlmLimit[] };
-
-        if (!data.limits || !Array.isArray(data.limits)) {
-          continue;
+        const usage = this.normalizeQuotaLimitResponse(rawData.data || rawData, profileId, profileName);
+        if (usage) {
+          return usage;
         }
-
-        // Calculate generic usage stats from limits
-        // We find the limit with the highest percentage to represent "Session" (or general) usage
-        let maxPercent = 0;
-        let weeklyPercent = 0; // GLM doesn't distinguish strictly, so we map primarily to session
-        let nextReset: string | undefined;
-
-        for (const limit of data.limits) {
-          const pct = limit.percentage || 0;
-          if (pct > maxPercent) {
-            maxPercent = pct;
-            nextReset = limit.nextResetTime
-              ? this.formatResetTime(new Date(limit.nextResetTime).toISOString())
-              : undefined;
-          }
-        }
-
-        // Map to snapshot
-        // GLM API returns: currentValue = current usage, usage = total limit
-        const customUsageDetails = data.limits.map(limit => {
-          // Format large numbers (millions of tokens)
-          const formatNumber = (n: number | undefined): string => {
-            if (n === undefined || n === null) return 'N/A';
-            if (n >= 1000000) {
-              return `${(n / 1000000).toFixed(2)}M`;
-            }
-            if (n >= 1000) {
-              return `${(n / 1000).toFixed(1)}K`;
-            }
-            return n.toString();
-          };
-
-          const current = limit.currentValue ?? 0;
-          const total = limit.usage ?? 0; // usage is the total limit, NOT limit.number
-
-          return {
-            label: limit.type,
-            value: `${formatNumber(current)} / ${formatNumber(total)}`,
-            percentage: limit.percentage || 0,
-            resetTime: limit.nextResetTime
-              ? this.formatResetTime(new Date(limit.nextResetTime).toISOString())
-              : undefined
-          };
-        });
-
-        return {
-          sessionPercent: Math.round(maxPercent),
-          weeklyPercent: 0, // Not explicitly separate in GLM generic response usually
-          sessionResetTime: nextReset || 'Unknown',
-          weeklyResetTime: 'Unknown',
-          profileId,
-          profileName,
-          fetchedAt: new Date(),
-          limitType: 'session',
-          customUsageDetails
-        };
 
       } catch (error) {
         // Ignore and try next
@@ -540,14 +716,14 @@ export class UsageMonitor extends EventEmitter {
       return null;
     }
 
-    // Attempt 1: Direct API call (Antrophic / GLM)
-    if (this.useApiMethod && oauthToken) {
-      // Try Anthropic first
-      let apiUsage = await this.fetchUsageViaAPI(oauthToken, profileId, profile.name);
+    // Attempt 1: Direct API call (Anthropic / GLM)
+    if (oauthToken && this.shouldUseApiMethod(profileId)) {
+      // Try provider endpoint first
+      let apiUsage = await this.fetchUsageViaAPI(tokenToUse, profileId, profile.name);
 
-      // If Anthropic failed, try GLM
+      // If provider endpoint failed, try GLM fallback endpoints
       if (!apiUsage) {
-        apiUsage = await this.fetchGlmUsage(oauthToken, profileId, profile.name);
+        apiUsage = await this.fetchGlmUsage(tokenToUse, profileId, profile.name);
       }
 
       if (apiUsage) {
@@ -571,19 +747,41 @@ export class UsageMonitor extends EventEmitter {
   private async fetchUsageViaAPI(
     oauthToken: string,
     profileId: string,
-    profileName: string
+    profileName: string,
+    _email?: string,
+    activeProfile?: ActiveProfileContext
   ): Promise<ClaudeUsageSnapshot | null> {
     try {
-      const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
+      const profileContext = await this.resolveActiveProfileContext(profileId, profileName, activeProfile);
+      const baseUrl = profileContext.baseUrl || 'https://api.anthropic.com';
+      const provider = detectProvider(baseUrl);
+      const endpoint = getUsageEndpoint(provider, baseUrl);
+
+      if (!endpoint || provider === 'unknown') {
+        this.apiFailureTimestamps.set(profileId, Date.now());
+        console.error('[UsageMonitor] Unsupported provider for usage endpoint:', { profileId, baseUrl, provider });
+        return null;
+      }
+
+      const headers: Record<string, string> = provider === 'anthropic'
+        ? {
+            'Authorization': `Bearer ${oauthToken}`,
+            'Content-Type': 'application/json',
+            'anthropic-version': '2023-06-01'
+          }
+        : {
+            'Authorization': oauthToken,
+            'Accept-Language': 'en-US,en',
+            'Content-Type': 'application/json'
+          };
+
+      const response = await fetch(endpoint, {
         method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${oauthToken}`,
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01'
-        }
+        headers
       });
 
       if (!response.ok) {
+        this.apiFailureTimestamps.set(profileId, Date.now());
         console.error('[UsageMonitor] API error:', response.status, response.statusText);
         // Throw specific error for auth failures so we can trigger a swap
         if (response.status === 401 || response.status === 403) {
@@ -594,39 +792,34 @@ export class UsageMonitor extends EventEmitter {
         return null;
       }
 
-      const data = await response.json() as {
-        five_hour_utilization?: number;
-        seven_day_utilization?: number;
-        five_hour_reset_at?: string;
-        seven_day_reset_at?: string;
-      };
+      const rawData = await response.json();
+      if (provider === 'anthropic') {
+        return this.normalizeAnthropicResponse(rawData, profileId, profileName);
+      }
 
-      // Expected response format:
-      // {
-      //   "five_hour_utilization": 0.72,  // 0.0-1.0
-      //   "seven_day_utilization": 0.45,  // 0.0-1.0
-      //   "five_hour_reset_at": "2025-01-17T15:00:00Z",
-      //   "seven_day_reset_at": "2025-01-20T12:00:00Z"
-      // }
+      if (provider === 'zai') {
+        const usage = this.normalizeZAIResponse(rawData?.data || rawData, profileId, profileName);
+        if (usage) {
+          return usage;
+        }
+      }
 
-      return {
-        sessionPercent: Math.round((data.five_hour_utilization || 0) * 100),
-        weeklyPercent: Math.round((data.seven_day_utilization || 0) * 100),
-        sessionResetTime: this.formatResetTime(data.five_hour_reset_at),
-        weeklyResetTime: this.formatResetTime(data.seven_day_reset_at),
-        profileId,
-        profileName,
-        fetchedAt: new Date(),
-        limitType: (data.seven_day_utilization || 0) > (data.five_hour_utilization || 0)
-          ? 'weekly'
-          : 'session'
-      };
+      if (provider === 'zhipu') {
+        const usage = this.normalizeZhipuResponse(rawData?.data || rawData, profileId, profileName);
+        if (usage) {
+          return usage;
+        }
+      }
+
+      this.apiFailureTimestamps.set(profileId, Date.now());
+      return null;
     } catch (error: any) {
       // Re-throw auth failures to be handled by checkUsageAndSwap
       if (error?.statusCode === 401 || error?.statusCode === 403) {
         throw error;
       }
-      
+
+      this.apiFailureTimestamps.set(profileId, Date.now());
       console.error('[UsageMonitor] API fetch failed:', error);
       return null;
     }
