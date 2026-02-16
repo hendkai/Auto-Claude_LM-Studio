@@ -178,7 +178,10 @@ export function FontConfigPanel({ settings, onSettingChange }: FontConfigPanelPr
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   'disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent'
                 )}
-                title={t('terminalFonts.fontConfig.decreaseFontSize', { step: FONT_SIZE_STEP })}
+                title={t('terminalFonts.fontConfig.decreaseFontSize', {
+                  step: FONT_SIZE_STEP,
+                  defaultValue: 'Decrease font size',
+                })}
               >
                 <Minus className="h-3.5 w-3.5" />
               </button>
@@ -192,7 +195,10 @@ export function FontConfigPanel({ settings, onSettingChange }: FontConfigPanelPr
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   'disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent'
                 )}
-                title={t('terminalFonts.fontConfig.increaseFontSize', { step: FONT_SIZE_STEP })}
+                title={t('terminalFonts.fontConfig.increaseFontSize', {
+                  step: FONT_SIZE_STEP,
+                  defaultValue: 'Increase font size',
+                })}
               >
                 <Plus className="h-3.5 w-3.5" />
               </button>
@@ -262,7 +268,10 @@ export function FontConfigPanel({ settings, onSettingChange }: FontConfigPanelPr
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 'disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent'
               )}
-              title={t('terminalFonts.fontConfig.decreaseFontWeight', { step: FONT_WEIGHT_STEP })}
+              title={t('terminalFonts.fontConfig.decreaseFontWeight', {
+                step: FONT_WEIGHT_STEP,
+                defaultValue: 'Decrease font weight',
+              })}
             >
               <Minus className="h-3.5 w-3.5" />
             </button>
@@ -276,7 +285,10 @@ export function FontConfigPanel({ settings, onSettingChange }: FontConfigPanelPr
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 'disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent'
               )}
-              title={t('terminalFonts.fontConfig.increaseFontWeight', { step: FONT_WEIGHT_STEP })}
+              title={t('terminalFonts.fontConfig.increaseFontWeight', {
+                step: FONT_WEIGHT_STEP,
+                defaultValue: 'Increase font weight',
+              })}
             >
               <Plus className="h-3.5 w-3.5" />
             </button>

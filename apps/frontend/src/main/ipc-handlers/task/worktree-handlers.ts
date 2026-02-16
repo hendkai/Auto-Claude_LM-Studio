@@ -22,7 +22,64 @@ import { getIsolatedGitEnv } from '../../utils/git-isolation';
 import { killProcessGracefully } from '../../platform';
 
 // Regex pattern for validating git branch names
-const GIT_BRANCH_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._/-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$/;
+export const GIT_BRANCH_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._/-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$/;
+
+export type WorktreeBranchValidationReason = 'exact_match' | 'pattern_match' | 'invalid_pattern' | 'detection_failed';
+
+export interface WorktreeBranchValidationResult {
+  branchToDelete: string;
+  usedFallback: boolean;
+  reason: WorktreeBranchValidationReason;
+}
+
+/**
+ * Validate detected branch from a task worktree and fall back to expected branch when unsafe.
+ *
+ * This protects against corrupted worktree states where `git rev-parse --abbrev-ref HEAD`
+ * can resolve to the main repository branch.
+ */
+export function validateWorktreeBranch(
+  detectedBranch: string | null | undefined,
+  expectedBranch: string
+): WorktreeBranchValidationResult {
+  if (detectedBranch == null) {
+    return {
+      branchToDelete: expectedBranch,
+      usedFallback: true,
+      reason: 'detection_failed'
+    };
+  }
+
+  const normalizedDetectedBranch = detectedBranch.trim();
+  if (normalizedDetectedBranch === expectedBranch) {
+    return {
+      branchToDelete: normalizedDetectedBranch,
+      usedFallback: false,
+      reason: 'exact_match'
+    };
+  }
+
+  // Only trust auto-claude/* branches for deletion when the detected branch differs.
+  const isValidAutoClaudeBranch =
+    normalizedDetectedBranch !== 'HEAD' &&
+    normalizedDetectedBranch.startsWith('auto-claude/') &&
+    normalizedDetectedBranch.length > 'auto-claude/'.length &&
+    GIT_BRANCH_REGEX.test(normalizedDetectedBranch);
+
+  if (isValidAutoClaudeBranch) {
+    return {
+      branchToDelete: normalizedDetectedBranch,
+      usedFallback: false,
+      reason: 'pattern_match'
+    };
+  }
+
+  return {
+    branchToDelete: expectedBranch,
+    usedFallback: true,
+    reason: 'invalid_pattern'
+  };
+}
 
 // Maximum PR title length (GitHub's limit is 256 characters)
 const MAX_PR_TITLE_LENGTH = 256;

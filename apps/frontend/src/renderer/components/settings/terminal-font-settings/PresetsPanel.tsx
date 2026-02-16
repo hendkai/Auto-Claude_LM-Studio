@@ -33,24 +33,32 @@ const BUILTIN_PRESETS = [
     id: 'vscode',
     nameKey: 'settings:terminalFonts.presets.vscodeName',
     description: 'settings:terminalFonts.presets.vscode',
+    defaultName: 'VS Code',
+    defaultDescription: 'VS Code terminal defaults',
     icon: Monitor,
   },
   {
     id: 'intellij',
     nameKey: 'settings:terminalFonts.presets.intellijName',
     description: 'settings:terminalFonts.presets.intellij',
+    defaultName: 'IntelliJ IDEA',
+    defaultDescription: 'IntelliJ terminal defaults',
     icon: Monitor,
   },
   {
     id: 'macos',
     nameKey: 'settings:terminalFonts.presets.macosName',
     description: 'settings:terminalFonts.presets.macos',
+    defaultName: 'macOS Terminal',
+    defaultDescription: 'macOS Terminal defaults',
     icon: Monitor,
   },
   {
     id: 'ubuntu',
     nameKey: 'settings:terminalFonts.presets.ubuntuName',
     description: 'settings:terminalFonts.presets.ubuntu',
+    defaultName: 'Ubuntu Terminal',
+    defaultDescription: 'Ubuntu terminal defaults',
     icon: Monitor,
   },
 ];
@@ -276,12 +284,16 @@ export function PresetsPanel({ currentSettings, onPresetApply, onReset }: Preset
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
                     'border-border hover:border-primary/50 hover:bg-accent/50'
                   )}
-                  title={t(preset.description)}
+                  title={t(preset.description, { defaultValue: preset.defaultDescription })}
                 >
                   <Icon className="h-5 w-5" />
                   <div className="text-center">
-                    <div className="text-sm font-medium">{t(preset.nameKey)}</div>
-                    <div className="text-xs text-muted-foreground">{t(preset.description)}</div>
+                    <div className="text-sm font-medium">
+                      {t(preset.nameKey, { defaultValue: preset.defaultName })}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {t(preset.description, { defaultValue: preset.defaultDescription })}
+                    </div>
                   </div>
                 </button>
               );

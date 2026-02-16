@@ -1047,6 +1047,7 @@ def handle_merge_preview_command(
         non_lock_conflicting_files = [
             f for f in git_conflicts.get("conflicting_files", []) if not is_lock_file(f)
         ]
+        has_non_lock_git_conflicts = len(non_lock_conflicting_files) > 0
 
         # Detect conflict scenario (already_merged, superseded, diverged, normal_conflict)
         # This helps the UI show appropriate messaging and actions
@@ -1129,7 +1130,7 @@ def handle_merge_preview_command(
             "files": all_changed_files,
             "conflicts": conflicts,
             "gitConflicts": {
-                "hasConflicts": git_conflicts["has_conflicts"],
+                "hasConflicts": has_non_lock_git_conflicts,
                 "conflictingFiles": non_lock_conflicting_files,
                 "needsRebase": git_conflicts["needs_rebase"],
                 "commitsBehind": git_conflicts["commits_behind"],
@@ -1155,7 +1156,7 @@ def handle_merge_preview_command(
                 "conflictFiles": conflict_files,
                 "totalConflicts": total_conflicts,
                 "autoMergeable": 0,  # Not tracking auto-merge in lightweight mode
-                "hasGitConflicts": git_conflicts["has_conflicts"],
+                "hasGitConflicts": has_non_lock_git_conflicts,
                 # Include path-mapped AI merge count for UI display
                 "pathMappedAIMergeCount": len(path_mapped_ai_merges),
             },

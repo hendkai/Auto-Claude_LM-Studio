@@ -17,6 +17,24 @@ export interface PythonEnvStatus {
   error?: string;
 }
 
+type ElectronAppLike = {
+  isPackaged?: boolean;
+  getPath?: (name: string) => string;
+  on?: (event: string, listener: () => void) => void;
+};
+
+function getElectronAppSafe(): ElectronAppLike | null {
+  try {
+    return app as unknown as ElectronAppLike;
+  } catch {
+    return null;
+  }
+}
+
+function isPackagedApp(): boolean {
+  return getElectronAppSafe()?.isPackaged === true;
+}
+
 /**
  * Manages the Python environment for the auto-claude backend.
  *
@@ -53,8 +71,11 @@ export class PythonEnvManager extends EventEmitter {
 
     // For packaged apps, put venv in userData (writable location)
     // This fixes Linux AppImage where resources are read-only
-    if (app.isPackaged) {
-      return path.join(app.getPath('userData'), 'python-venv');
+    if (isPackagedApp()) {
+      const electronApp = getElectronAppSafe();
+      if (electronApp && typeof electronApp.getPath === 'function') {
+        return path.join(electronApp.getPath('userData'), 'python-venv');
+      }
     }
 
     // Development mode - use source directory
@@ -98,7 +119,7 @@ export class PythonEnvManager extends EventEmitter {
    * These are pre-installed during the build process.
    */
   private getBundledSitePackagesPath(): string | null {
-    if (!app.isPackaged) {
+    if (!isPackagedApp()) {
       return null;
     }
 
@@ -270,7 +291,7 @@ if sys.version_info >= (3, 12):
 
     const systemPython = this.findSystemPython();
     if (!systemPython) {
-      const isPackaged = app.isPackaged;
+      const isPackaged = isPackagedApp();
       const errorMsg = isPackaged
         ? 'Python not found. The bundled Python may be corrupted.\n\n' +
           'Please try reinstalling the application, or install Python 3.10+ manually:\n' +
@@ -508,7 +529,7 @@ if sys.version_info >= (3, 12):
 
     try {
       // For packaged apps, try to use bundled packages first (no pip install needed!)
-      if (app.isPackaged && this.hasBundledPackages()) {
+      if (isPackagedApp() && this.hasBundledPackages()) {
         console.warn('[PythonEnvManager] Using bundled Python packages (no pip install needed)');
 
         const bundledPython = getBundledPythonPath();
@@ -817,8 +838,9 @@ if sys.version_info >= (3, 12):
 export const pythonEnvManager = new PythonEnvManager();
 
 // Register cleanup on app exit (guard for test environments where app.on may not exist)
-if (typeof app?.on === 'function') {
-  app.on('will-quit', () => {
+const electronApp = getElectronAppSafe();
+if (electronApp && typeof electronApp.on === 'function') {
+  electronApp.on('will-quit', () => {
     pythonEnvManager.cleanup();
   });
 }

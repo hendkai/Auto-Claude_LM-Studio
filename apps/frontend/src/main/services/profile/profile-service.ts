@@ -526,15 +526,11 @@ export async function testConnection(
 }
 
 /**
- * Discover available models from API endpoint
- * 
- * Fetches the list of available models using a robust fetch-based approach
- * to support both Anthropic and OpenAI-compatible (LM Studio/Ollama) endpoints.
- * 
- * @param baseUrl - API base URL (will be normalized)
- * @param apiKey - API key for authentication
- * @param signal - Optional AbortSignal for cancelling the request
- * @returns Promise<DiscoverModelsResult> List of available models
+ * Discover available models from API endpoint.
+ *
+ * Primary path uses Anthropic SDK (for consistent error typing and existing tests).
+ * For local OpenAI-compatible endpoints (LM Studio/Ollama), it falls back to direct
+ * /v1/models fetch when SDK model discovery is not supported.
  */
 export async function discoverModels(
   baseUrl: string,
@@ -561,20 +557,34 @@ export async function discoverModels(
   }
   normalizedUrl = normalizedUrl.replace(/\/+$/, '');
 
-  // Construct models endpoint URL
-  // Strip any existing /v1 suffix (user might input it), then add /v1/models
-  // This ensures we always call the correct endpoint: baseUrl + /v1/models
-  normalizedUrl = normalizedUrl.replace(/\/v1\/?$/, ''); // Strip trailing /v1 if present
-  let modelsUrl = `${normalizedUrl}/v1/models`;
+  // Construct models endpoint URL for OpenAI-compatible fallback.
+  const normalizedBaseUrl = normalizedUrl.replace(/\/v1\/?$/, '');
+  const modelsUrl = `${normalizedBaseUrl}/v1/models`;
 
-  try {
-    // Prepare headers for BOTH Anthropic and OpenAI compatibility
+  const shouldUseOpenAIFallback = (): boolean => {
+    if (apiKey === 'lm-studio') return true;
+    try {
+      const host = new URL(normalizedBaseUrl).hostname.toLowerCase();
+      return host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
+    } catch {
+      return false;
+    }
+  };
+
+  const mapModels = (modelsList: unknown[]): ModelInfo[] => {
+    return modelsList
+      .map((model: any) => ({
+        id: model?.id || model?.name || '',
+        display_name: model?.display_name || model?.id || model?.name || ''
+      }))
+      .filter((model) => model.id && model.id.trim().length > 0);
+  };
+
+  const fetchOpenAICompatibleModels = async (): Promise<DiscoverModelsResult> => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      // Anthropic headers
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
-      // OpenAI headers
       'Authorization': `Bearer ${apiKey}`
     };
 
@@ -585,7 +595,6 @@ export async function discoverModels(
     });
 
     if (!response.ok) {
-      // Handle specific HTTP errors
       if (response.status === 401 || response.status === 403) {
         const error: Error & { errorType?: string } = new Error('Authentication failed. Please check your API key.');
         error.errorType = 'auth';
@@ -593,7 +602,7 @@ export async function discoverModels(
       }
       if (response.status === 404) {
         const error: Error & { errorType?: string } = new Error(`Endpoint not found: ${modelsUrl}`);
-        error.errorType = 'endpoint';
+        error.errorType = 'not_supported';
         throw error;
       }
 
@@ -602,43 +611,84 @@ export async function discoverModels(
     }
 
     const data = await response.json() as any;
-
-    // Parse models from response
-    // Support both { data: [...] } (Standard) and { models: [...] } (Some variations)
-    const modelsList = Array.isArray(data.data) ? data.data : (Array.isArray(data.models) ? data.models : []);
+    const modelsList = Array.isArray(data?.data)
+      ? data.data
+      : (Array.isArray(data?.models) ? data.models : []);
 
     if (!Array.isArray(modelsList)) {
       throw new Error('Invalid API response: "data" field is missing or not an array');
     }
 
-    // Map to ModelInfo, loosely accepting OpenAI or Anthropic format
-    const models: ModelInfo[] = modelsList
-      .map((model: any) => ({
-        id: model.id || model.name || '',
-        display_name: model.display_name || model.id || model.name || ''
-      }))
-      .filter((model) => model.id && model.id.trim().length > 0);
+    return { models: mapModels(modelsList) };
+  };
 
-    return { models };
+  try {
+    const client = new Anthropic({
+      apiKey,
+      baseURL: normalizedBaseUrl,
+      timeout: 10000,
+      maxRetries: 0
+    });
+
+    const response = await client.models.list({ limit: 100 }, { signal: signal ?? undefined });
+    const modelsList = Array.isArray((response as any)?.data) ? (response as any).data : [];
+    if (!Array.isArray(modelsList)) {
+      throw new Error('Invalid API response: "data" field is missing or not an array');
+    }
+    return { models: mapModels(modelsList) };
 
   } catch (error) {
-    // Pass through custom errorTypes
     if ((error as any).errorType) {
       throw error;
     }
 
-    // Map fetch errors
-    if (error instanceof Error) {
-      if (error.name === 'AbortError') {
-        const e: Error & { errorType?: string } = new Error('Connection timeout.');
-        e.errorType = 'timeout';
-        throw e;
+    const errorName = error instanceof Error ? error.name : '';
+
+    if (errorName === 'AuthenticationError' || error instanceof AuthenticationError) {
+      const e: Error & { errorType?: string } = new Error('Authentication failed. Please check your API key.');
+      e.errorType = 'auth';
+      throw e;
+    }
+
+    if (errorName === 'APIConnectionTimeoutError' || error instanceof APIConnectionTimeoutError) {
+      const e: Error & { errorType?: string } = new Error('Connection timeout.');
+      e.errorType = 'timeout';
+      throw e;
+    }
+
+    if (errorName === 'APIConnectionError' || error instanceof APIConnectionError) {
+      const e: Error & { errorType?: string } = new Error('Network connection failed. Check URL and internet.');
+      e.errorType = 'network';
+      throw e;
+    }
+
+    const notSupported = errorName === 'NotFoundError' || error instanceof NotFoundError;
+    if (notSupported) {
+      if (shouldUseOpenAIFallback()) {
+        try {
+          return await fetchOpenAICompatibleModels();
+        } catch (fallbackError) {
+          if ((fallbackError as any).errorType) {
+            throw fallbackError;
+          }
+          if (fallbackError instanceof Error && fallbackError.name === 'AbortError') {
+            const e: Error & { errorType?: string } = new Error('Connection timeout.');
+            e.errorType = 'timeout';
+            throw e;
+          }
+          if (fallbackError instanceof Error && fallbackError.message.includes('fetch failed')) {
+            const e: Error & { errorType?: string } = new Error('Network connection failed. Check URL and internet.');
+            e.errorType = 'network';
+            throw e;
+          }
+          const e: Error & { errorType?: string } = new Error(fallbackError instanceof Error ? fallbackError.message : 'Discovery failed');
+          e.errorType = 'unknown';
+          throw e;
+        }
       }
-      if (error.message.includes('fetch failed')) {
-        const e: Error & { errorType?: string } = new Error('Network connection failed. Check URL and internet.');
-        e.errorType = 'network';
-        throw e;
-      }
+      const e: Error & { errorType?: string } = new Error('Model discovery is not supported for this endpoint.');
+      e.errorType = 'not_supported';
+      throw e;
     }
 
     const unknownError: Error & { errorType?: string } = new Error(error instanceof Error ? error.message : 'Discovery failed');
