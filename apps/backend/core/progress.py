@@ -576,6 +576,9 @@ def get_next_subtask(spec_dir: Path) -> dict | None:
                 phase_id_value if phase_id_value is not None else phase.get("phase")
             )
             for subtask in _get_phase_subtasks(phase):
+                subtask_id = subtask.get("id")
+                if subtask_id in stuck_subtask_ids:
+                    continue
                 status = str(subtask.get("status", "pending")).strip().lower()
                 if status in {"in_progress", "in progress"}:
                     subtask_out, _changed = normalize_subtask_aliases(subtask)
@@ -593,6 +596,9 @@ def get_next_subtask(spec_dir: Path) -> dict | None:
                 phase_id_value if phase_id_value is not None else phase.get("phase")
             )
             for subtask in _get_phase_subtasks(phase):
+                subtask_id = subtask.get("id")
+                if subtask_id in stuck_subtask_ids:
+                    continue
                 status = str(subtask.get("status", "pending")).strip().lower()
                 if status in {
                     "pending",
@@ -618,6 +624,9 @@ def get_next_subtask(spec_dir: Path) -> dict | None:
                 phase_id_value if phase_id_value is not None else phase.get("phase")
             )
             for subtask in _get_phase_subtasks(phase):
+                subtask_id = subtask.get("id")
+                if subtask_id in stuck_subtask_ids:
+                    continue
                 status = str(subtask.get("status", "pending")).strip().lower()
                 if status in {"completed", "failed", "blocked"}:
                     continue
