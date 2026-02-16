@@ -8,6 +8,15 @@ Auto Claude is a multi-agent autonomous coding framework that builds software th
 
 **CRITICAL: All AI interactions use the Claude Agent SDK (`claude-agent-sdk` package), NOT the Anthropic API directly.**
 
+### Resetting PR Review State
+
+To fully clear all PR review data so reviews run fresh, delete/reset these three things in `.auto-claude/github/`:
+
+1. `rm .auto-claude/github/pr/logs_*.json` — review log files
+2. `rm .auto-claude/github/pr/review_*.json` — review result files
+3. Reset `pr/index.json` to `{"reviews": [], "last_updated": null}`
+4. Reset `bot_detection_state.json` to `{"reviewed_commits": {}}` — this is the gatekeeper; without clearing it, the bot detector skips already-seen commits
+
 ## Project Structure
 
 ```
