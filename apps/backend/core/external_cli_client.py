@@ -85,7 +85,7 @@ class ExternalCLIClient:
 
         for raw_entry in [*extra_dirs, *existing_path.split(os.pathsep)]:
             entry = raw_entry.strip()
-            if not entry or not os.path.isdir(entry):
+            if not entry:
                 continue
             normalized = os.path.normcase(os.path.normpath(entry))
             if normalized in seen:
