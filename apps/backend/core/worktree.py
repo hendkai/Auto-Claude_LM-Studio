@@ -605,19 +605,22 @@ class WorktreeManager:
 
     def create_worktree(self, spec_name: str) -> WorktreeInfo:
         """
-        Create a worktree for a spec.
+        Create a worktree for a spec (idempotent).
 
         Args:
             spec_name: The spec folder name (e.g., "002-implement-memory")
 
         Returns:
-            WorktreeInfo for the created worktree
+            WorktreeInfo for the created or existing worktree
 
         Raises:
             WorktreeError: If a branch namespace conflict exists or worktree creation fails
         """
         worktree_path = self.get_worktree_path(spec_name)
         branch_name = self.get_branch_name(spec_name)
+
+        # Clean orphaned references first to avoid false "already checked out" states.
+        self._run_git(["worktree", "prune"])
 
         # Check for branch namespace conflict (e.g., 'auto-claude' blocking 'auto-claude/*')
         conflicting_branch = self._check_branch_namespace_conflict()
@@ -632,27 +635,36 @@ class WorktreeManager:
                 f"  git branch -m {conflicting_branch} {conflicting_branch}-backup"
             )
 
-        # Remove existing if present (from crashed previous run)
-        if worktree_path.exists():
-            self._run_git(["worktree", "remove", "--force", str(worktree_path)])
+        # Existing registered worktree: return it (idempotent behavior).
+        if worktree_path.exists() and self._worktree_is_registered(worktree_path):
+            existing = self.get_worktree_info(spec_name)
+            if existing:
+                print(
+                    f"Using existing worktree: {worktree_path.name} on branch {existing.branch}"
+                )
+                return existing
 
-        # Delete branch if it exists (from previous attempt)
-        delete_result = self._run_git(["branch", "-D", branch_name])
-        
-        # If deletion failed, it might be locked by a stale worktree
-        if delete_result.returncode != 0:
-            # Check for "used by worktree at" in stderr
-            match = re.search(r"used by worktree at '(.*?)'", delete_result.stderr)
-            if match:
-                stale_path = Path(match.group(1))
-                print(f"Found stale worktree blocking branch: {stale_path}")
-                if stale_path.exists():
-                    print(f"Removing stale worktree directory: {stale_path}")
-                    shutil.rmtree(stale_path, ignore_errors=True)
-            
-            # Prune and retry branch deletion
-            self._run_git(["worktree", "prune"])
-            self._run_git(["branch", "-D", branch_name])
+            # Registered but unreadable/corrupted, force-remove and recreate.
+            print(f"Removing corrupted worktree registration: {worktree_path.name}")
+            remove_result = self._run_git(
+                ["worktree", "remove", "--force", str(worktree_path)]
+            )
+            if remove_result.returncode != 0:
+                raise WorktreeError(
+                    f"Failed to remove corrupted worktree: {remove_result.stderr}"
+                )
+
+        # Existing unregistered directory: clean stale filesystem state.
+        if worktree_path.exists() and not self._worktree_is_registered(worktree_path):
+            print(f"Removing stale worktree directory: {worktree_path.name}")
+            shutil.rmtree(worktree_path, ignore_errors=True)
+            if worktree_path.exists():
+                raise WorktreeError(
+                    f"Failed to remove stale worktree directory: {worktree_path}\n"
+                    "This may be due to permission issues or file locks."
+                )
+
+        branch_exists = self._branch_exists(branch_name)
 
         # Determine the start point for the worktree.
         # Default behavior prefers origin/<base_branch> for freshest remote state.
@@ -681,10 +693,15 @@ class WorktreeManager:
                     f"Remote ref {remote_ref} not found, using local branch: {self.base_branch}"
                 )
 
-        # Create worktree with new branch from the start point (remote preferred)
-        result = self._run_git(
-            ["worktree", "add", "-b", branch_name, str(worktree_path), start_point]
-        )
+        if branch_exists:
+            # Branch exists - attach worktree to existing branch (no -b flag).
+            print(f"Reusing existing branch: {branch_name}")
+            result = self._run_git(["worktree", "add", str(worktree_path), branch_name])
+        else:
+            # Branch doesn't exist - create from the selected start point.
+            result = self._run_git(
+                ["worktree", "add", "-b", branch_name, str(worktree_path), start_point]
+            )
 
         if result.returncode != 0:
             raise WorktreeError(
