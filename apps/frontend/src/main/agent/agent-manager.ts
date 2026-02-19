@@ -219,7 +219,8 @@ export class AgentManager extends EventEmitter {
       this.storeTaskContext(taskId, projectPath, '', {}, true, taskDescription, specDir, metadata, baseBranch);
 
       // Note: This is spec-creation but it chains to task-execution via run.py
-      await this.processManager.spawnProcess(taskId, autoBuildSource, args, runtimeEnv, 'task-execution');
+      // Use projectPath as cwd to avoid cross-drive path issues on Windows.
+      await this.processManager.spawnProcess(taskId, projectPath, args, runtimeEnv, 'task-execution');
     } finally {
       this.startingTasks.delete(taskId);
     }
@@ -309,7 +310,8 @@ export class AgentManager extends EventEmitter {
       // Store context for potential restart
       this.storeTaskContext(taskId, projectPath, specId, options, false);
 
-      await this.processManager.spawnProcess(taskId, autoBuildSource, args, runtimeEnv, 'task-execution');
+      // Use projectPath as cwd to avoid cross-drive path issues on Windows.
+      await this.processManager.spawnProcess(taskId, projectPath, args, runtimeEnv, 'task-execution');
     } finally {
       this.startingTasks.delete(taskId);
     }
@@ -352,7 +354,8 @@ export class AgentManager extends EventEmitter {
 
     const args = [runPath, '--spec', specId, '--project-dir', projectPath, '--qa'];
 
-    await this.processManager.spawnProcess(taskId, autoBuildSource, args, runtimeEnv, 'qa-process');
+    // Use projectPath as cwd to avoid cross-drive path issues on Windows.
+    await this.processManager.spawnProcess(taskId, projectPath, args, runtimeEnv, 'qa-process');
   }
 
   /**
