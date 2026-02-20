@@ -48,7 +48,7 @@ import { initializeUsageMonitorForwarding } from './ipc-handlers/terminal-handle
 import { initializeAppUpdater, stopPeriodicUpdates } from './app-updater';
 import { DEFAULT_APP_SETTINGS } from '../shared/constants';
 import { readSettingsFile } from './settings-utils';
-import { setupErrorLogging } from './app-logger';
+import { appLog, setupErrorLogging } from './app-logger';
 import { initSentryMain } from './sentry';
 import { preWarmToolCache } from './cli-tool-manager';
 import { initializeClaudeProfileManager } from './claude-profile-manager';

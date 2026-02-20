@@ -130,6 +130,11 @@ export function registerTaskExecutionHandlers(
     IPC_CHANNELS.TASK_START,
     async (_, taskId: string, _options?: TaskStartOptions) => {
       console.warn('[TASK_START] Received request for taskId:', taskId);
+
+      // Cancel any pending fallback timer from previous process exit
+      // This prevents the stale timer from incorrectly stopping the newly restarted task
+      cancelFallbackTimer(taskId);
+
       const mainWindow = getMainWindow();
       if (!mainWindow) {
         console.warn('[TASK_START] No main window found');
@@ -571,7 +576,7 @@ export function registerTaskExecutionHandlers(
       _,
       taskId: string,
       status: TaskStatus,
-      options?: { forceCleanup?: boolean }
+      options?: { forceCleanup?: boolean; keepWorktree?: boolean }
     ): Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }> => {
       // Find task and project first (needed for worktree check)
       const { task, project } = findTaskAndProject(taskId);
@@ -583,13 +588,17 @@ export function registerTaskExecutionHandlers(
       // Validate status transition - 'done' can only be set through merge handler
       // UNLESS there's no worktree (limbo state - already merged/discarded or failed)
       // OR forceCleanup is requested (user confirmed they want to delete the worktree)
+      // OR keepWorktree is requested (user wants to mark done without deleting worktree)
       if (status === 'done') {
         // Check if worktree exists (task.specId matches worktree folder name)
         const worktreePath = findTaskWorktree(project.path, task.specId);
         const hasWorktree = worktreePath !== null;
 
         if (hasWorktree) {
-          if (options?.forceCleanup) {
+          if (options?.keepWorktree) {
+            // User explicitly chose to keep worktree - allow marking as done
+            console.warn(`[TASK_UPDATE_STATUS] Marking task ${taskId} as done while keeping worktree at ${worktreePath}`);
+          } else if (options?.forceCleanup) {
             // User confirmed cleanup - delete worktree and branch
             console.warn(`[TASK_UPDATE_STATUS] Cleaning up worktree for task ${taskId} (user confirmed)`);
             try {
@@ -1159,6 +1168,10 @@ export function registerTaskExecutionHandlers(
           }
 
           try {
+            // Cancel any pending fallback timer from previous process exit
+            // This prevents the stale timer from incorrectly stopping the restarted task
+            cancelFallbackTimer(taskId);
+
             // Set status to in_progress for the restart
             newStatus = 'in_progress';
 

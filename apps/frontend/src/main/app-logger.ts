@@ -215,6 +215,36 @@ export const appLog = {
   log: (...args: unknown[]) => log.info(...args),
 };
 
+/**
+ * Best-effort stderr fallback used when electron-log itself throws (e.g. EIO).
+ * Must never throw, especially inside uncaught exception handlers.
+ */
+function safeStderrWrite(message: string): void {
+  try {
+    process.stderr.write(`${message}\n`);
+  } catch {
+    // Ignore - nothing else we can safely do here.
+  }
+}
+
+/**
+ * Log an unhandled error without risking recursive crashes if logger transport fails.
+ */
+function safeLogUnhandled(prefix: string, value: unknown): void {
+  try {
+    log.error(prefix, value);
+  } catch (loggingError) {
+    const loggingFailure = loggingError instanceof Error
+      ? `${loggingError.name}: ${loggingError.message}`
+      : String(loggingError);
+    const original = value instanceof Error
+      ? (value.stack || `${value.name}: ${value.message}`)
+      : String(value);
+    safeStderrWrite(`[app-logger] ${prefix} (logger failed: ${loggingFailure})`);
+    safeStderrWrite(original);
+  }
+}
+
 // Log unhandled errors
 export function setupErrorLogging(): void {
   process.on('uncaughtException', (error) => {

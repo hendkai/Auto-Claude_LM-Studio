@@ -1129,6 +1129,9 @@ class WorktreeManager:
             )
 
         target = target_branch or self.base_branch
+        # Strip remote prefix (e.g., "origin/feat/x" → "feat/x") since gh expects branch names only
+        if target.startswith("origin/"):
+            target = target[len("origin/") :]
         pr_title = title or f"auto-claude: {spec_name}"
 
         # Get PR body from spec.md if available
@@ -1285,6 +1288,9 @@ class WorktreeManager:
             )
 
         target = target_branch or self.base_branch
+        # Strip remote prefix (e.g., "origin/feat/x" → "feat/x") since glab expects branch names only
+        if target.startswith("origin/"):
+            target = target[len("origin/") :]
         mr_title = title or f"auto-claude: {spec_name}"
 
         # Get MR body from spec.md if available

@@ -100,6 +100,12 @@ function validateStatusTransition(
   return true;
 }
 
+// Timeout for fallback safety net to check if task is still stuck after process exit
+const STUCK_TASK_FALLBACK_TIMEOUT_MS = 500;
+
+// Map to store active fallback timers so they can be cancelled on task restart
+const fallbackTimers = new Map<string, NodeJS.Timeout>();
+
 /**
  * Register all agent-events-related IPC handlers
  */
@@ -588,4 +594,18 @@ export function registerAgenteventsHandlers(
     const { project } = findTaskAndProject(taskId);
     safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_ERROR, taskId, error, project?.id);
   });
+}
+
+/**
+ * Cancel any pending fallback timer for a task.
+ * Should be called when a task is restarted to prevent the stale timer
+ * from incorrectly stopping the new process.
+ */
+export function cancelFallbackTimer(taskId: string): void {
+  const timer = fallbackTimers.get(taskId);
+  if (timer) {
+    clearTimeout(timer);
+    fallbackTimers.delete(taskId);
+    console.debug(`[agent-events-handlers] Cancelled fallback timer for task ${taskId}`);
+  }
 }
