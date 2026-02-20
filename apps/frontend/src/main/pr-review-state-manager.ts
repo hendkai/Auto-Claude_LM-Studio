@@ -137,7 +137,7 @@ export class PRReviewStateManager {
 
     const actor = createActor(prReviewMachine);
 
-    actor.subscribe((snapshot) => {
+    actor.subscribe((snapshot: ReturnType<PRReviewActor['getSnapshot']>) => {
       const stateValue = String(snapshot.value);
       const contextKey = buildContextKey(snapshot);
       const currentKey = `${stateValue}:${contextKey}`;

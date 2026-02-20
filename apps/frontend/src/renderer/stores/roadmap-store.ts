@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { create } from 'zustand';
 import { createActor } from 'xstate';
-import type { Actor } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
 import type {
   Competitor,
   CompetitorAnalysis,
@@ -26,8 +26,8 @@ import {
 // Module-level XState actor singletons
 // ---------------------------------------------------------------------------
 
-let generationActor: Actor<typeof roadmapGenerationMachine> | null = null;
-const featureActors = new Map<string, Actor<typeof roadmapFeatureMachine>>();
+let generationActor: ActorRefFrom<typeof roadmapGenerationMachine> | null = null;
+const featureActors = new Map<string, ActorRefFrom<typeof roadmapFeatureMachine>>();
 
 /**
  * Reset all actors to clean state.
@@ -49,7 +49,7 @@ export function resetActors(): void {
 function getOrCreateGenerationActor(
   initialState?: RoadmapGenerationStatus['phase'],
   initialContext?: Partial<{ progress: number; message: string; error: string; startedAt: number; completedAt: number; lastActivityAt: number }>
-): Actor<typeof roadmapGenerationMachine> {
+): ActorRefFrom<typeof roadmapGenerationMachine> {
   // Invalidate cached actor if its state doesn't match the expected value
   if (generationActor && initialState) {
     const currentValue = String(generationActor.getSnapshot().value);
@@ -88,7 +88,7 @@ function getOrCreateFeatureActor(
   featureId: string,
   initialState?: RoadmapFeatureStatus,
   initialContext?: Partial<{ linkedSpecId: string; taskOutcome: TaskOutcome; previousStatus: RoadmapFeatureStatus }>
-): Actor<typeof roadmapFeatureMachine> {
+): ActorRefFrom<typeof roadmapFeatureMachine> {
   let actor = featureActors.get(featureId);
   // Invalidate cached actor if its state or context doesn't match the expected values
   if (actor && initialState) {
@@ -197,7 +197,7 @@ const initialGenerationStatus: RoadmapGenerationStatus = {
 /**
  * Derive RoadmapGenerationStatus from the generation actor's current snapshot.
  */
-function deriveGenerationStatus(actor: Actor<typeof roadmapGenerationMachine>): RoadmapGenerationStatus {
+function deriveGenerationStatus(actor: ActorRefFrom<typeof roadmapGenerationMachine>): RoadmapGenerationStatus {
   const snapshot = actor.getSnapshot();
   const phase = mapGenerationStateToPhase(String(snapshot.value));
   const ctx = snapshot.context;

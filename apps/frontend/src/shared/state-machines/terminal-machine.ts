@@ -139,20 +139,20 @@ export const terminalMachine = createMachine(
   },
   {
     guards: {
-      hasActiveSession: ({ context }) => context.claudeSessionId !== undefined,
-      isCapturingPhase: ({ context }) => context.swapPhase === 'capturing',
-      isMigratingPhase: ({ context }) => context.swapPhase === 'migrating',
-      isRecreatingPhase: ({ context }) => context.swapPhase === 'recreating',
-      isResumingPhase: ({ context }) => context.swapPhase === 'resuming',
+      hasActiveSession: ({ context }: { context: TerminalContext }) => context.claudeSessionId !== undefined,
+      isCapturingPhase: ({ context }: { context: TerminalContext }) => context.swapPhase === 'capturing',
+      isMigratingPhase: ({ context }: { context: TerminalContext }) => context.swapPhase === 'migrating',
+      isRecreatingPhase: ({ context }: { context: TerminalContext }) => context.swapPhase === 'recreating',
+      isResumingPhase: ({ context }: { context: TerminalContext }) => context.swapPhase === 'resuming',
     },
     actions: {
       setProfileId: assign({
-        profileId: ({ event }) =>
+        profileId: ({ event }: { event: TerminalEvent }) =>
           event.type === 'CLAUDE_START' ? event.profileId : undefined,
         error: () => undefined,
       }),
       setClaudeSessionId: assign({
-        claudeSessionId: ({ event }) => {
+        claudeSessionId: ({ event }: { event: TerminalEvent }) => {
           if (event.type === 'CLAUDE_ACTIVE') return event.claudeSessionId;
           if (event.type === 'RESUME_COMPLETE') return event.claudeSessionId;
           if (event.type === 'RESUME_REQUESTED') return event.claudeSessionId;
@@ -166,16 +166,16 @@ export const terminalMachine = createMachine(
       // Updates sessionId but preserves isBusy (avoids resetting busy indicator
       // when the session ID is refreshed without a state change)
       updateClaudeSessionId: assign({
-        claudeSessionId: ({ event }) =>
+        claudeSessionId: ({ event }: { event: TerminalEvent }) =>
           event.type === 'CLAUDE_ACTIVE' ? event.claudeSessionId : undefined,
         error: () => undefined,
       }),
       setBusy: assign({
-        isBusy: ({ event }) =>
+        isBusy: ({ event }: { event: TerminalEvent }) =>
           event.type === 'CLAUDE_BUSY' ? event.isBusy : false,
       }),
       setError: assign({
-        error: ({ event }) => {
+        error: ({ event }: { event: TerminalEvent }) => {
           if (event.type === 'CLAUDE_EXITED') return event.error;
           if (event.type === 'SWAP_FAILED') return event.error;
           if (event.type === 'RESUME_FAILED') return event.error;
@@ -188,22 +188,22 @@ export const terminalMachine = createMachine(
         isBusy: () => false,
       }),
       setSwapTarget: assign({
-        swapTargetProfileId: ({ event }) =>
+        swapTargetProfileId: ({ event }: { event: TerminalEvent }) =>
           event.type === 'SWAP_INITIATED' ? event.targetProfileId : undefined,
         swapPhase: () => 'capturing' as const,
         error: () => undefined,
       }),
       setCapturedSession: assign({
-        claudeSessionId: ({ event }) =>
+        claudeSessionId: ({ event }: { event: TerminalEvent }) =>
           event.type === 'SWAP_SESSION_CAPTURED' ? event.claudeSessionId : undefined,
       }),
       setSwapPhaseMigrating: assign({ swapPhase: () => 'migrating' as const }),
       setSwapPhaseRecreating: assign({ swapPhase: () => 'recreating' as const }),
       setSwapPhaseResuming: assign({ swapPhase: () => 'resuming' as const }),
       applySwapComplete: assign({
-        claudeSessionId: ({ event }) =>
+        claudeSessionId: ({ event }: { event: TerminalEvent }) =>
           event.type === 'SWAP_RESUME_COMPLETE' ? event.claudeSessionId : undefined,
-        profileId: ({ event }) =>
+        profileId: ({ event }: { event: TerminalEvent }) =>
           event.type === 'SWAP_RESUME_COMPLETE' ? event.profileId : undefined,
         swapTargetProfileId: () => undefined,
         swapPhase: () => undefined,

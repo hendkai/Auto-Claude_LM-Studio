@@ -144,8 +144,8 @@ export const prReviewMachine = createMachine(
   {
     actions: {
       setReviewStart: assign({
-        prNumber: ({ event }) => (event as { prNumber: number }).prNumber,
-        projectId: ({ event }) => (event as { projectId: string }).projectId,
+        prNumber: ({ event }: { event: PRReviewEvent }) => (event as { prNumber: number }).prNumber,
+        projectId: ({ event }: { event: PRReviewEvent }) => (event as { projectId: string }).projectId,
         startedAt: () => new Date().toISOString(),
         isFollowup: () => false,
         progress: () => null,
@@ -155,25 +155,25 @@ export const prReviewMachine = createMachine(
         isExternalReview: () => false,
       }),
       setFollowupReviewStart: assign({
-        prNumber: ({ event }) => (event as { prNumber: number }).prNumber,
-        projectId: ({ event }) => (event as { projectId: string }).projectId,
+        prNumber: ({ event }: { event: PRReviewEvent }) => (event as { prNumber: number }).prNumber,
+        projectId: ({ event }: { event: PRReviewEvent }) => (event as { projectId: string }).projectId,
         startedAt: () => new Date().toISOString(),
         isFollowup: () => true,
         progress: () => null,
         result: () => null,
-        previousResult: ({ event }) => (event as { previousResult: PRReviewResult }).previousResult,
+        previousResult: ({ event }: { event: PRReviewEvent }) => (event as { previousResult: PRReviewResult }).previousResult,
         error: () => null,
         isExternalReview: () => false,
       }),
       setProgress: assign({
-        progress: ({ event }) => (event as { progress: PRReviewProgress }).progress,
+        progress: ({ event }: { event: PRReviewEvent }) => (event as { progress: PRReviewProgress }).progress,
       }),
       setResult: assign({
-        result: ({ event }) => (event as { result: PRReviewResult }).result,
+        result: ({ event }: { event: PRReviewEvent }) => (event as { result: PRReviewResult }).result,
         progress: () => null,
       }),
       setError: assign({
-        error: ({ event }) => (event as { error: string }).error,
+        error: ({ event }: { event: PRReviewEvent }) => (event as { error: string }).error,
         progress: () => null,
       }),
       setCancelledError: assign({

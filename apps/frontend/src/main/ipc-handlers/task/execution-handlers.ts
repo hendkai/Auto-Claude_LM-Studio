@@ -20,6 +20,7 @@ import { findTaskWorktree } from '../../worktree-paths';
 import { projectStore } from '../../project-store';
 import { getIsolatedGitEnv } from '../../utils/git-isolation';
 import { buildPhaseProviderEnvConfig, hasProviderAuthInConfig } from '../../services/profile/profile-env-utils';
+import { cancelFallbackTimer } from '../agent-events-handlers';
 
 /**
  * Atomic file write to prevent TOCTOU race conditions.

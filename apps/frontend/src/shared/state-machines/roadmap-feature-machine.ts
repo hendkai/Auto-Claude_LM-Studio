@@ -166,12 +166,12 @@ export const roadmapFeatureMachine = createMachine(
   },
   {
     guards: {
-      previousWasInProgress: ({ context }) => context.previousStatus === 'in_progress',
-      previousWasPlanned: ({ context }) => context.previousStatus === 'planned'
+      previousWasInProgress: ({ context }: { context: RoadmapFeatureContext }) => context.previousStatus === 'in_progress',
+      previousWasPlanned: ({ context }: { context: RoadmapFeatureContext }) => context.previousStatus === 'planned'
     },
     actions: {
       setLinkedSpec: assign({
-        linkedSpecId: ({ event }) =>
+        linkedSpecId: ({ event }: { event: RoadmapFeatureEvent }) =>
           event.type === 'LINK_SPEC' ? event.specId : undefined
       }),
       savePreviousUnderReview: assign({ previousStatus: () => 'under_review' as const }),

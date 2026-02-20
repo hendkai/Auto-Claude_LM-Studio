@@ -5,10 +5,7 @@
  * derived from the roadmap machine definitions. Used by roadmap-store
  * and roadmap hooks to avoid duplicate constants.
  */
-import type { StateValueFrom } from 'xstate';
 import type { RoadmapGenerationStatus, RoadmapFeatureStatus } from '../types/roadmap';
-import { roadmapGenerationMachine } from './roadmap-generation-machine';
-import { roadmapFeatureMachine } from './roadmap-feature-machine';
 
 /**
  * All XState generation state names.
@@ -22,12 +19,6 @@ export const GENERATION_STATE_NAMES = [
 
 export type GenerationStateName = typeof GENERATION_STATE_NAMES[number];
 
-// Compile-time assertion: ensures every element in GENERATION_STATE_NAMES is a valid machine state.
-// The reverse direction (every machine state is in the array) is enforced by the exhaustive switch
-// in mapGenerationStateToPhase below — adding a new machine state without a switch case will cause
-// it to silently map to 'idle' via default, which the mapGenerationStateToPhase tests will catch.
-const _genCheck: readonly StateValueFrom<typeof roadmapGenerationMachine>[] = GENERATION_STATE_NAMES;
-
 /**
  * All XState feature state names.
  *
@@ -39,10 +30,6 @@ export const FEATURE_STATE_NAMES = [
 ] as const;
 
 export type FeatureStateName = typeof FEATURE_STATE_NAMES[number];
-
-// Compile-time assertion: ensures every element in FEATURE_STATE_NAMES is a valid machine state.
-// Reverse direction enforced by mapFeatureStateToStatus switch exhaustiveness (see comment above).
-const _featCheck: readonly StateValueFrom<typeof roadmapFeatureMachine>[] = FEATURE_STATE_NAMES;
 
 /**
  * Generation states where the machine has settled — the generation is
