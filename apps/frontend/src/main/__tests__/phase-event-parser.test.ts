@@ -85,6 +85,12 @@ describe('Phase Event Parser', () => {
         expect(result?.phase).toBe('qa_review');
       });
 
+      it('should normalize legacy validation phase to qa_review', () => {
+        const line = '__EXEC_PHASE__:{"phase":"validation","message":"Running QA validation"}';
+        const result = parsePhaseEvent(line);
+        expect(result?.phase).toBe('qa_review');
+      });
+
       it('should accept qa_fixing phase', () => {
         const line = '__EXEC_PHASE__:{"phase":"qa_fixing","message":""}';
         const result = parsePhaseEvent(line);

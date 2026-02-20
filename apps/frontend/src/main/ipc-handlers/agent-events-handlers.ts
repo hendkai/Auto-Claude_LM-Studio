@@ -472,13 +472,22 @@ export function registerAgenteventsHandlers(
       // Use shared helper to find task and project (issue #723 - deduplicate lookup)
       const { task, project } = findTaskAndProject(taskId);
       const taskProjectId = project?.id;
+      const rawPhase = progress.phase as string;
+      const normalizedPhase = rawPhase === "validation" ? "qa_review" : rawPhase;
+      const normalizedProgress: ExecutionProgressData =
+        normalizedPhase === progress.phase
+          ? progress
+          : {
+              ...progress,
+              phase: normalizedPhase as ExecutionProgressData["phase"],
+            };
 
       // Include projectId in execution progress event for multi-project filtering
       safeSendToRenderer(
         getMainWindow,
         IPC_CHANNELS.TASK_EXECUTION_PROGRESS,
         taskId,
-        progress,
+        normalizedProgress,
         taskProjectId
       );
 
@@ -486,16 +495,17 @@ export function registerAgenteventsHandlers(
         idle: null,
         planning: "in_progress",
         coding: "in_progress",
+        validation: "ai_review",
         qa_review: "ai_review",
         qa_fixing: "ai_review",
         complete: "human_review",
         failed: "human_review",
       };
 
-      let newStatus = phaseToStatus[progress.phase];
+      let newStatus = phaseToStatus[normalizedPhase];
       let reviewReason: "completed" | "errors" | undefined;
       // Guard against premature "complete" when subtasks are not actually done.
-      if (progress.phase === "complete" && task) {
+      if (normalizedPhase === "complete" && task) {
         const totalSubtasks = task.subtasks?.length ?? 0;
         const completedSubtasks = task.subtasks?.filter((s) => s.status === "completed").length ?? 0;
         if (totalSubtasks === 0 || completedSubtasks < totalSubtasks) {
@@ -503,11 +513,11 @@ export function registerAgenteventsHandlers(
         } else {
           reviewReason = "completed";
         }
-      } else if (progress.phase === "failed") {
+      } else if (normalizedPhase === "failed") {
         reviewReason = "errors";
       }
       // FIX (ACS-55, ACS-71): Validate status transition before sending/persisting
-      if (newStatus && validateStatusTransition(task, newStatus, progress.phase)) {
+      if (newStatus && validateStatusTransition(task, newStatus, normalizedPhase)) {
         // Include projectId in status change event for multi-project filtering
         safeSendToRenderer(
           getMainWindow,

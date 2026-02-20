@@ -189,7 +189,8 @@ export class ExecutionPhaseParser extends BasePhaseParser<ExecutionPhase> {
       canEnterQAPhase &&
       (lowerLog.includes('qa reviewer') ||
        lowerLog.includes('qa_reviewer') ||
-       lowerLog.includes('starting qa'))
+       lowerLog.includes('starting qa') ||
+       lowerLog.includes('qa validation'))
     ) {
       return { phase: 'qa_review', message: 'Running QA review...' };
     }

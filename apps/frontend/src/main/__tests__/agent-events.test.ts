@@ -33,6 +33,13 @@ describe('AgentEvents', () => {
         expect(result?.phase).toBe('qa_fixing');
       });
 
+      it('should normalize legacy validation structured phase to qa_review', () => {
+        const line = '__EXEC_PHASE__:{"phase":"validation","message":"Running QA validation"}';
+        const result = agentEvents.parseExecutionPhase(line, 'coding', false);
+
+        expect(result?.phase).toBe('qa_review');
+      });
+
       it('should pass through message from structured event', () => {
         const line = '__EXEC_PHASE__:{"phase":"coding","message":"Custom message here"}';
         const result = agentEvents.parseExecutionPhase(line, 'planning', false);

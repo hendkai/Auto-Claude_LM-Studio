@@ -10,6 +10,35 @@ export { PHASE_MARKER_PREFIX };
 export type { PhaseEventPayload as PhaseEvent };
 
 const DEBUG = process.env.DEBUG?.toLowerCase() === 'true' || process.env.DEBUG === '1';
+const LEGACY_PHASE_ALIASES: Readonly<Record<string, string>> = {
+  validation: 'qa_review'
+};
+
+function normalizeLegacyPhasePayload(rawPayload: unknown): unknown {
+  if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
+    return rawPayload;
+  }
+
+  const payload = rawPayload as Record<string, unknown>;
+  const phase = payload.phase;
+  if (typeof phase !== 'string') {
+    return rawPayload;
+  }
+
+  const normalizedPhase = LEGACY_PHASE_ALIASES[phase];
+  if (!normalizedPhase) {
+    return rawPayload;
+  }
+
+  if (DEBUG) {
+    console.log(`[phase-event-parser] Normalized legacy phase "${phase}" -> "${normalizedPhase}"`);
+  }
+
+  return {
+    ...payload,
+    phase: normalizedPhase
+  };
+}
 
 export function parsePhaseEvent(line: string): PhaseEventPayload | null {
   const markerIndex = line.indexOf(PHASE_MARKER_PREFIX);
@@ -43,7 +72,8 @@ export function parsePhaseEvent(line: string): PhaseEventPayload | null {
 
   try {
     const rawPayload = JSON.parse(jsonStr) as unknown;
-    const result = validatePhaseEvent(rawPayload);
+    const normalizedPayload = normalizeLegacyPhasePayload(rawPayload);
+    const result = validatePhaseEvent(normalizedPayload);
 
     if (!result.success) {
       if (DEBUG) {

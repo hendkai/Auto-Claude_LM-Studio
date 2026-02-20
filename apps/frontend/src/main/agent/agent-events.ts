@@ -125,7 +125,15 @@ export class AgentEvents {
     const canEnterQAPhase = currentPhase === 'coding' || currentPhase === 'qa_review' || currentPhase === 'qa_fixing';
 
     // QA Review phase
-    if (canEnterQAPhase && (lowerLog.includes('qa reviewer') || lowerLog.includes('qa_reviewer') || lowerLog.includes('starting qa'))) {
+    if (
+      canEnterQAPhase &&
+      (
+        lowerLog.includes('qa reviewer') ||
+        lowerLog.includes('qa_reviewer') ||
+        lowerLog.includes('starting qa') ||
+        lowerLog.includes('qa validation')
+      )
+    ) {
       return { phase: 'qa_review', message: 'Running QA review...' };
     }
 
