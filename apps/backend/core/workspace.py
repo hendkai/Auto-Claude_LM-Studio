@@ -18,6 +18,7 @@ Public API is exported via workspace/__init__.py for backward compatibility.
 """
 
 from pathlib import Path
+import subprocess
 
 # Import git command helper for centralized logging and allowlist compliance
 from core.git_executable import run_git
